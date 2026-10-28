@@ -63,10 +63,14 @@ func (s *Server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		"version": s.Cf.AppVersion(),
 		// The service used to be a Node program; it is a Go binary now, so the
 		// UI shows the Go runtime instead of the Node version.
-		"runtime":       runtime.Version(),
-		"cloudflared":   s.Cf.Version(false),
-		"binary":        s.P.CFBin,
-		"binaryExists":  fsx.Exists(s.P.CFBin),
+		"runtime":      runtime.Version(),
+		"cloudflared":  s.Cf.Version(false),
+		"binary":       s.P.ActiveCFBin(),
+		"binaryExists": fsx.Exists(s.P.ActiveCFBin()),
+		// Whether the binary in use is the one shipped in the package or one
+		// updated in place. They live in different places because the payload is
+		// replaced on every upgrade.
+		"binarySource":  binarySource(s.P),
 		"platform":      runtime.GOOS,
 		"arch":          runtime.GOARCH,
 		"gatewayPrefix": s.P.GatewayPrefix,
@@ -204,18 +208,41 @@ func (s *Server) handleAppLog(w http.ResponseWriter, r *http.Request) {
 	sendJSON(w, http.StatusOK, map[string]any{"lines": lines})
 }
 
-// handleBinary replaces the bundled cloudflared with the newest upstream build.
+// handleBinary replaces the bundled cloudflared with the newest upstream build,
+// or reverts to the bundled one.
 func (s *Server) handleBinary(w http.ResponseWriter, r *http.Request, id string) {
-	if id != "update" || r.Method != http.MethodPost {
+	if r.Method != http.MethodPost {
 		sendError(w, http.StatusNotFound, "接口不存在")
 		return
 	}
-	version, err := s.Cf.UpdateBinary()
-	if err != nil {
-		sendJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
-		return
+	switch id {
+	case "update":
+		version, err := s.Cf.UpdateBinary()
+		if err != nil {
+			sendJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		sendJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version})
+	case "reset":
+		// Getting back to the bundled binary has to be possible: an update that
+		// turns out badly would otherwise be permanent short of a reinstall.
+		version, err := s.Cf.ResetBinary()
+		if err != nil {
+			sendJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		sendJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version})
+	default:
+		sendError(w, http.StatusNotFound, "接口不存在")
 	}
-	sendJSON(w, http.StatusOK, map[string]any{"ok": true, "version": version})
+}
+
+// binarySource reports where the cloudflared in use came from.
+func binarySource(p paths.Paths) string {
+	if p.ActiveCFBin() == p.CFBinUpdated {
+		return "updated"
+	}
+	return "bundled"
 }
 
 // rawString accepts a JSON string or number, matching the tolerance the

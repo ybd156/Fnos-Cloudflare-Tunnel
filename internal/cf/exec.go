@@ -140,7 +140,7 @@ func (r *Runner) Exec(args []string, opts ExecOptions) ExecResult {
 		dir = r.p.PkgVar
 	}
 
-	cmd := exec.CommandContext(ctx, r.p.CFBin, args...)
+	cmd := exec.CommandContext(ctx, r.p.ActiveCFBin(), args...)
 	cmd.Dir = dir
 	cmd.Env = r.Env(opts.Env)
 
@@ -223,7 +223,7 @@ func (r *Runner) Version(refresh bool) string {
 			return cached
 		}
 	}
-	if !fsx.Exists(r.p.CFBin) {
+	if !fsx.Exists(r.p.ActiveCFBin()) {
 		return ""
 	}
 

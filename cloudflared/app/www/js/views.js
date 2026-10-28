@@ -256,6 +256,25 @@ export async function updateBinary() {
   }
 }
 
+/* Drop the in-place update so the binary shipped in the package is used again.
+   Without this a bad update would be permanent short of a reinstall. */
+export async function resetBinary() {
+  const btn = $('#btn-reset-bin');
+  if (!confirm('将删除已更新的 cloudflared，改用安装包内置的版本。确定继续？')) return;
+  btn.disabled = true;
+  btn.textContent = '恢复中…';
+  try {
+    const data = await api('POST', '/binary/reset');
+    toast(`已恢复内置版本 ${data.version}`);
+    await refreshMeta();
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '恢复内置版本';
+  }
+}
+
 /* ── app log view ─────────────────────────────────────────────────────── */
 
 /* The log is painted through the same in-place painter the tunnel cards use,

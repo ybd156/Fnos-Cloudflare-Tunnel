@@ -1,12 +1,14 @@
 package cf
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -51,12 +53,13 @@ type releaseInfo struct {
 	Assets []releaseAsset `json:"assets"`
 }
 
-// UpdateBinary replaces the bundled cloudflared with the newest upstream
-// release and records the version actually in use.
+// UpdateBinary replaces the cloudflared binary with the newest upstream release.
 //
-// The binary lives in the app payload, so an app upgrade overwrites it again;
-// the recorded version in the var directory is what tells the UI that an
-// in-place update happened.
+// The new binary is written to $PKGVAR, not to the payload. The payload
+// directory is replaced wholesale on every install and upgrade, so a binary
+// updated inside app/bin is silently reverted by the next package install: a
+// user who updated to a newer release found the bundled one back after upgrading
+// the app. $PKGVAR survives upgrades, and paths.ActiveCFBin prefers it.
 func (r *Runner) UpdateBinary() (string, error) {
 	arch, err := updateArch()
 	if err != nil {
@@ -79,6 +82,7 @@ func (r *Runner) UpdateBinary() (string, error) {
 		return "", fmt.Errorf("未找到适配 %s 的发布文件", arch)
 	}
 
+	fsx.MkdirAll(filepath.Dir(r.p.CFBinUpdated), 0o755)
 	tmp := filepath.Join(r.p.PkgTmp, fmt.Sprintf("cloudflared-%d", time.Now().UnixMilli()))
 	defer os.Remove(tmp)
 
@@ -87,13 +91,21 @@ func (r *Runner) UpdateBinary() (string, error) {
 	}
 	fsx.ChmodQuiet(tmp, 0o755)
 
+	// Prove the download actually runs before it replaces a working binary. A
+	// truncated file or the wrong architecture would otherwise leave the app
+	// with a cloudflared that cannot start a single tunnel, and the failure
+	// would only surface on the next start.
+	if err := verifyBinary(tmp); err != nil {
+		return "", err
+	}
+
 	data, err := os.ReadFile(tmp)
 	if err != nil {
 		return "", fmt.Errorf("读取下载文件失败: %s", err.Error())
 	}
 	// Atomic replace: a tunnel restarting at this instant must never see a
 	// half-written binary.
-	if err := fsx.AtomicWrite(r.p.CFBin, data, 0o755); err != nil {
+	if err := fsx.AtomicWrite(r.p.CFBinUpdated, data, 0o755); err != nil {
 		return "", fmt.Errorf("替换 cloudflared 失败: %s", err.Error())
 	}
 
@@ -101,8 +113,44 @@ func (r *Runner) UpdateBinary() (string, error) {
 	if err := fsx.AtomicWrite(r.p.CFVersionFile, []byte(version+"\n"), 0o644); err != nil {
 		return version, fmt.Errorf("记录 cloudflared 版本失败: %s", err.Error())
 	}
-	r.info("cloudflared binary updated to", version)
+	r.info("cloudflared binary updated to", version, "("+r.p.CFBinUpdated+")")
 	return version, nil
+}
+
+// ResetBinary drops the updated binary so the bundled one is used again.
+//
+// Without this a bad update would be permanent: the only other way back is
+// reinstalling the whole package.
+func (r *Runner) ResetBinary() (string, error) {
+	if fsx.Exists(r.p.CFBinUpdated) {
+		if err := os.Remove(r.p.CFBinUpdated); err != nil {
+			return "", fmt.Errorf("删除已更新的 cloudflared 失败: %s", err.Error())
+		}
+	}
+	version := r.Version(true)
+	if err := fsx.AtomicWrite(r.p.CFVersionFile, []byte(version+"\n"), 0o644); err != nil {
+		return version, fmt.Errorf("记录 cloudflared 版本失败: %s", err.Error())
+	}
+	r.info("reverted to the bundled cloudflared", version)
+	return version, nil
+}
+
+// verifyBinary runs `--version` on a candidate binary.
+func verifyBinary(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		if text == "" {
+			text = err.Error()
+		}
+		return fmt.Errorf("下载的 cloudflared 无法执行: %s", text)
+	}
+	if !strings.Contains(text, "cloudflared version") {
+		return fmt.Errorf("下载的 cloudflared 未报告版本信息: %s", text)
+	}
+	return nil
 }
 
 // updateArch maps the Go architecture onto the asset name cloudflared

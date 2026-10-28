@@ -14,6 +14,9 @@ case "$(printf '%s' "${wizard_remove_data:-false}" | tr '[:upper:]' '[:lower:]')
 true | 1 | yes | on)
     log_info "Removing tunnel definitions, tokens and credentials from ${PKGVAR}."
     rm -rf "${PKGVAR}/.cloudflared" "${PKGVAR}/tunnels" "${PKGVAR}/logs" 2>/dev/null || true
+    # The in-place cloudflared update lives here too (~40MB). Leaving it behind
+    # would keep 40MB on the volume after a "delete my data" uninstall.
+    rm -rf "${PKGVAR}/bin" 2>/dev/null || true
     rm -f "${PKGVAR}/config.json" "${PKGVAR}/server.log" "${PKGVAR}/main.log" 2>/dev/null || true
     # Rotated generations and version markers. The server log rotates to
     # server.log.1 (up to MAX_APP_LOG_BYTES, 2MB), so without this a "delete my

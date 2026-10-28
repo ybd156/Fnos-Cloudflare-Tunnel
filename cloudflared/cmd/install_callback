@@ -29,6 +29,16 @@ chmod 755 "${APPDEST}/bin" 2>/dev/null || true
 [ -f "${SERVER_BIN}" ] || fail "应用文件缺失：${SERVER_BIN}"
 chmod 755 "${SERVER_BIN}" || fail "无法为服务二进制设置可执行权限。"
 
+# A cloudflared updated from the UI lives in the var directory, not in the
+# payload, precisely so an upgrade does not revert it. The archive never touches
+# that file, but its mode can still be lost if the volume is re-mounted, so
+# restore it here rather than failing at the next tunnel start.
+UPDATED_CF="${PKGVAR}/bin/cloudflared"
+if [ -f "${UPDATED_CF}" ]; then
+    chmod 755 "${UPDATED_CF}" 2>/dev/null || true
+    log_info "Keeping the updated cloudflared in ${UPDATED_CF}."
+fi
+
 # The UI is plain files under www/, including the ES module directory. A file
 # left at mode 0000 by the archive makes the page load nothing at all.
 if [ -d "${APPDEST}/www" ]; then

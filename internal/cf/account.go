@@ -88,7 +88,7 @@ func (r *Runner) LoginStart() error {
 	// the user has done anything.
 	fsx.UnlinkQuiet(r.p.CertFile)
 
-	cmd := exec.Command(r.p.CFBin, "tunnel", "login")
+	cmd := exec.Command(r.p.ActiveCFBin(), "tunnel", "login")
 	cmd.Dir = r.p.PkgVar
 	cmd.Env = r.Env(nil)
 

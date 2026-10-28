@@ -45,7 +45,8 @@ type Paths struct {
 	PkgEtc  string
 
 	WWW           string
-	CFBin         string // upstream cloudflared binary
+	CFBin         string // upstream cloudflared binary bundled in the payload
+	CFBinUpdated  string // cloudflared updated in place, kept in $PKGVAR
 	ServerBin     string // this service
 	SocketPath    string
 	GatewayPrefix string
@@ -85,6 +86,7 @@ func FromEnv() Paths {
 
 		WWW:           filepath.Join(appDest, "www"),
 		CFBin:         filepath.Join(appDest, "bin", "cloudflared"),
+		CFBinUpdated:  filepath.Join(pkgVar, "bin", "cloudflared"),
 		ServerBin:     filepath.Join(appDest, "bin", "fncfd"),
 		SocketPath:    filepath.Join(appDest, "app.sock"),
 		GatewayPrefix: "/app/" + appName,
@@ -116,6 +118,7 @@ func Rooted(root string) Paths {
 
 	p.WWW = filepath.Join(p.AppDest, "www")
 	p.CFBin = filepath.Join(p.AppDest, "bin", "cloudflared")
+	p.CFBinUpdated = filepath.Join(p.PkgVar, "bin", "cloudflared")
 	p.ServerBin = filepath.Join(p.AppDest, "bin", "fncfd")
 	p.SocketPath = filepath.Join(p.AppDest, "app.sock")
 
@@ -154,6 +157,23 @@ func (p Paths) EnsureDirs() error {
 		firstErr = fmt.Errorf("设置目录权限 %s 失败: %w", p.CFDir, err)
 	}
 	return firstErr
+}
+
+// ActiveCFBin returns the cloudflared binary the service should run.
+//
+// An in-place update is written to $PKGVAR, not to the payload, because the
+// payload directory is replaced wholesale on every install and upgrade. A binary
+// updated inside app/bin is therefore silently reverted by the next package
+// install -- which is exactly what happened to a user who had updated to a newer
+// release and found the old one back after upgrading the app.
+//
+// The bundled copy is the fallback, so a fresh install and a wiped var directory
+// both still work.
+func (p Paths) ActiveCFBin() string {
+	if st, err := os.Stat(p.CFBinUpdated); err == nil && st.Mode().IsRegular() {
+		return p.CFBinUpdated
+	}
+	return p.CFBin
 }
 
 // TunnelConfig is the generated config.yml for a locally-managed tunnel.

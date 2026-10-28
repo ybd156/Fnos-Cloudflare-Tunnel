@@ -1220,6 +1220,15 @@ input[type="checkbox"] {
   color: var(--log-dim);
 }
 
+/* Two buttons that belong together (update / revert), kept on one line and
+   allowed to wrap on a narrow card. */
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 /* Line numbers are a CSS counter, so turning them on is a class on the box
    rather than a repaint of every line. A grid puts the number in its own
    column, which keeps a wrapped line aligned with the text above it instead of

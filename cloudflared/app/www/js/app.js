@@ -41,6 +41,7 @@ import {
   onCreateTunnelClick,
   saveSettings,
   updateBinary,
+  resetBinary,
   refreshAppLog,
   copyAppLog,
   openNewTunnelModal,
@@ -207,6 +208,7 @@ $('#btn-create-tunnel').addEventListener('click', onCreateTunnelClick);
 
 $('#btn-save-settings').addEventListener('click', saveSettings);
 $('#btn-update-bin').addEventListener('click', updateBinary);
+$('#btn-reset-bin').addEventListener('click', resetBinary);
 
 $('#btn-refresh-applog').addEventListener('click', refreshAppLog);
 $('#btn-copy-applog').addEventListener('click', copyAppLog);

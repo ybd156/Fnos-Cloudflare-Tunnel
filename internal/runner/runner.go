@@ -252,8 +252,8 @@ func (m *Manager) start(id string, keepAttempts bool) error {
 	}
 	m.mu.Unlock()
 
-	if !fileExists(m.p.CFBin) {
-		msg := "cloudflared 可执行文件不存在: " + m.p.CFBin
+	if !fileExists(m.p.ActiveCFBin()) {
+		msg := "cloudflared 可执行文件不存在: " + m.p.ActiveCFBin()
 		m.mu.Lock()
 		r.status = StatusError
 		r.errMsg = msg
@@ -285,9 +285,9 @@ func (m *Manager) start(id string, keepAttempts bool) error {
 	r.startedAt = m.stampISO()
 	m.mu.Unlock()
 
-	m.info("starting tunnel " + id + " (" + tunnel.Type + "): " + m.p.CFBin + " " + strings.Join(args, " "))
+	m.info("starting tunnel " + id + " (" + tunnel.Type + "): " + m.p.ActiveCFBin() + " " + strings.Join(args, " "))
 
-	proc, err := m.spawn(m.p.CFBin, args, m.cf.Env(env), m.p.PkgVar)
+	proc, err := m.spawn(m.p.ActiveCFBin(), args, m.cf.Env(env), m.p.PkgVar)
 	if err != nil {
 		msg := "启动失败: " + err.Error()
 		m.mu.Lock()
