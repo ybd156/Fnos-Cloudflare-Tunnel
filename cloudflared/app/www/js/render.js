@@ -539,11 +539,24 @@ export function logBoxFor(id) {
 
 /* ── log boxes ────────────────────────────────────────────────────────── */
 
-/* Lines that deserve a highlight in a terminal view. cloudflared prints its
-   level as a bare token (ERR / WRN) in the structured lines, and the origin
-   failures a user actually cares about are spelled out in prose. */
-const LOG_ERR_RE = /\b(?:ERR|ERROR|FATAL)\b|connection refused|Unable to reach the origin|no such host|i\/o timeout|context deadline exceeded|connection reset by peer/i;
-const LOG_WARN_RE = /\b(?:WRN|WARN|WARNING)\b/i;
+/* The failures worth the loudest colour regardless of how cloudflared labelled
+   them: the origin is unreachable, or the name does not resolve. Checked before
+   the client-cancel rule so a line mentioning both stays an error. */
+const LOG_CRITICAL_RE = /Unable to reach the origin|connection refused|no such host/i;
+
+/* cloudflared logs a client that walked away mid-request as ERR, but nothing is
+   broken: the origin answered and then the browser (or a slow API caller) closed
+   the connection. "error code 0" is an explicit "no error" cancel. Painting
+   these the same red as a dead origin teaches the reader to ignore the colour
+   that does matter, so they get their own muted style. */
+const LOG_CANCEL_RE = /context canceled|canceled by remote with error code 0/i;
+
+/* cloudflared's own level token. Matched case-sensitively on purpose: every
+   structured line carries an uppercase ERR / WRN, while the prose "error=" key
+   appears in nearly all of them. Matching that case-insensitively painted the
+   whole log red. */
+const LOG_ERR_RE = /\b(?:ERR|ERROR|FATAL)\b/;
+const LOG_WARN_RE = /\b(?:WRN|WARN)\b/;
 
 /* The text last painted into a box. A WeakMap because boxes are recreated by
    the next rebuild and the entry should disappear with them. */
@@ -573,7 +586,9 @@ export function paintLog(box, lines) {
       const line = String(raw == null ? '' : raw);
       const el = document.createElement('span');
       let cls = 'log-line';
-      if (LOG_ERR_RE.test(line)) cls += ' is-err';
+      if (LOG_CRITICAL_RE.test(line)) cls += ' is-err';
+      else if (LOG_CANCEL_RE.test(line)) cls += ' is-cancel';
+      else if (LOG_ERR_RE.test(line)) cls += ' is-err';
       else if (LOG_WARN_RE.test(line)) cls += ' is-warn';
       el.className = cls;
       /* An empty line still has to occupy a row. */

@@ -1214,6 +1214,12 @@ input[type="checkbox"] {
   background: var(--log-warn-bg);
 }
 
+/* A client that hung up mid-request. Worth seeing in the log, not worth
+   alarming about: the origin did answer. */
+.log-line.is-cancel {
+  color: var(--log-dim);
+}
+
 /* Line numbers are a CSS counter, so turning them on is a class on the box
    rather than a repaint of every line. A grid puts the number in its own
    column, which keeps a wrapped line aligned with the text above it instead of
