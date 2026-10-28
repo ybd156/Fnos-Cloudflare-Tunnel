@@ -306,6 +306,24 @@ A：说明载荷里的 `bin/fncfd` 或 `bin/cloudflared` 没到位或没有可�
 A：打开该隧道的日志查看 cloudflared 输出。若 UDP 7844 被网络阻断，请在
 「设置」中把传输协议改为 `http2`。
 
+**Q：日志里出现 `ICMP proxy feature is disabled`，要紧吗？**
+A：不要紧，可以忽略。ICMP proxy 只用于 `icmp:` 类型的入站服务（本应用的入站规则
+只支持 http/https，不会用到），且它需要 root 或 ping 组权限 —— 应用以
+`run-as: package` 的普通用户身份运行，本来就拿不到。隧道连接不受影响。
+
+**Q：日志里出现 `CONNECTIVITY PRE-CHECKS` 和 `UDP Connectivity ... FAIL`，然后
+说 `degraded transport`、`will proceed using 'http2'`？**
+A：这是 cloudflared 的连接前自检：它发现到某个边缘区域的 UDP 7844 不通（常见于
+运营商或防火墙限制），于是自动回退到 HTTP/2。**隧道仍然可用**，只是传输协议变了。
+本应用默认的「传输协议 = 自动」正是让 cloudflared 自行判断与回退；如果希望跳过
+这段自检、直接走 HTTP/2，在「设置」里把传输协议固定为 `http2` 即可。
+
+**Q：为什么日志里有 `Starting metrics server on 127.0.0.1:20241`，我没开 metrics？**
+A：cloudflared 的 metrics 默认就开着，只监听 `127.0.0.1`（本机可访问，公网不可见）。
+「设置」里 Metrics 端口留 0 时，它会从 20241 起依次尝试 20242…20245，全被占用才
+随机选一个 —— 所以多个隧道并存不会撞端口。只有在设置里填了**固定**端口，多个隧道
+才会争用同一端口，这种情况请留 0。
+
 **Q：如何更新 cloudflared？**
 A：「设置」→「更新 cloudflared 二进制」，会从 GitHub 拉取最新版并原子替换。
 

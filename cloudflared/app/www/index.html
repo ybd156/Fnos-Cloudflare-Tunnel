@@ -162,7 +162,7 @@
           <label class="field">
             <span>Metrics 端口</span>
             <input type="number" id="set-metrics" min="0" max="65535" placeholder="0">
-            <small class="field-help">填 0 表示关闭。开启后仅监听 127.0.0.1。</small>
+            <small class="field-help">留 0 由 cloudflared 自动分配端口（从 20241 起依次尝试）。metrics 始终只监听 127.0.0.1，无法完全关闭；多个隧道请留 0，否则会争用同一端口。</small>
           </label>
         </div>
       </div>
