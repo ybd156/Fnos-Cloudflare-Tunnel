@@ -6,11 +6,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/ybd156/fnos-cloudflared/internal/config"
 	"github.com/ybd156/fnos-cloudflared/internal/dnsroute"
 	"github.com/ybd156/fnos-cloudflared/internal/fsx"
+	"github.com/ybd156/fnos-cloudflared/internal/lock"
 	"github.com/ybd156/fnos-cloudflared/internal/paths"
 	"github.com/ybd156/fnos-cloudflared/internal/runner"
 	"github.com/ybd156/fnos-cloudflared/internal/web"
@@ -51,6 +55,34 @@ func main() {
 	// Rotate before the first write: at startup nothing else is appending, so
 	// this is the one moment the check cannot race a concurrent writer.
 	log.RotateAppLogNow()
+
+	// One instance only. A stale PID file used to let a second instance start
+	// alongside the first, and two cloudflared processes for the same tunnel
+	// fight over the connection. The kernel drops this lock when the process
+	// exits, however it exits, so it cannot go stale.
+	inst, lockErr := lock.Acquire(filepath.Join(p.PkgVar, "server.lock"))
+	if lockErr != nil {
+		if errors.Is(lockErr, lock.ErrAlreadyRunning) {
+			// Not a failure: another instance is already serving. Exit
+			// successfully so the lifecycle script reports "started" rather than
+			// a failure the user would try to fix by starting yet another one.
+			log.Info("另一个实例已在运行，本进程退出")
+			fmt.Fprintln(os.Stderr, "另一个实例已在运行")
+			return
+		}
+		log.Error("无法获取单实例锁:", lockErr.Error())
+		os.Exit(1)
+	}
+	defer inst.Release()
+
+	// The service publishes its own PID. The lifecycle script writes this file
+	// too, but only the running process can keep it truthful; a value written by
+	// a launcher that then died is what made `status` report "not running" for a
+	// service that was very much alive.
+	if err := writePIDFile(p.PIDFile); err != nil {
+		log.Warn("写入 PID 文件失败:", err.Error())
+	}
+	defer fsx.UnlinkQuiet(p.PIDFile)
 
 	store := config.NewStore(p.ConfigFile, log)
 	store.Load()
@@ -119,6 +151,13 @@ func main() {
 	manager.StopAll()
 	manager.WaitIdle(10 * time.Second)
 	log.Info("shutdown complete")
+}
+
+// writePIDFile records this process's PID for the lifecycle scripts. The file is
+// advisory: the single-instance lock is what actually prevents duplicates, and
+// `cmd/main` falls back to scanning /proc when this file is stale.
+func writePIDFile(path string) error {
+	return fsx.AtomicWrite(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
 }
 
 // runConfigSet applies the answers collected by the fnOS install/settings wizard

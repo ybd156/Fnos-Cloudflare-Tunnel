@@ -55,6 +55,8 @@
         </div>
       </div>
 
+      <div class="banner hidden" id="origin-banner" role="status"></div>
+
       <div class="summary hidden" id="tunnel-summary" role="group" aria-label="按状态筛选隧道"></div>
 
       <div id="tunnel-list" class="cards"></div>
@@ -112,99 +114,101 @@
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-head">
-          <h3>连接</h3>
-          <span class="hint">影响 cloudflared 与 Cloudflare 边缘的通信方式</span>
-        </div>
-        <div class="card-body field-grid">
-          <label class="field">
-            <span>传输协议</span>
-            <select id="set-protocol">
-              <option value="auto">自动（推荐）</option>
-              <option value="http2">HTTP/2</option>
-              <option value="quic">QUIC</option>
-            </select>
-            <small class="field-help">UDP 被限制时选 HTTP/2。</small>
-          </label>
-          <label class="field">
-            <span>Edge IP 版本</span>
-            <select id="set-edge">
-              <option value="">默认</option>
-              <option value="4">仅 IPv4</option>
-              <option value="6">仅 IPv6</option>
-            </select>
-            <small class="field-help">只有纯 IPv6 或纯 IPv4 网络才需要指定。</small>
-          </label>
-          <label class="field">
-            <span>区域（region）</span>
-            <input type="text" id="set-region" placeholder="留空为自动，例如 us">
-            <small class="field-help">强制连接到指定区域的边缘节点。</small>
-          </label>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h3>日志与监控</h3>
-        </div>
-        <div class="card-body field-grid">
-          <label class="field">
-            <span>日志级别</span>
-            <select id="set-loglevel">
-              <option value="debug">debug</option>
-              <option value="info">info</option>
-              <option value="warn">warn</option>
-              <option value="error">error</option>
-            </select>
-            <small class="field-help">debug 会产生大量日志，仅在排查问题时使用。</small>
-          </label>
-          <label class="field">
-            <span>Metrics 端口</span>
-            <input type="number" id="set-metrics" min="0" max="65535" placeholder="0">
-            <small class="field-help">留 0 由 cloudflared 自动分配端口（从 20241 起依次尝试）。metrics 始终只监听 127.0.0.1，无法完全关闭；多个隧道请留 0，否则会争用同一端口。</small>
-          </label>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h3>行为</h3>
-        </div>
-        <div class="card-body">
-          <label class="field switch">
-            <input type="checkbox" id="set-autostart">
-            <span>
-              应用启动时自动启动已启用的隧道
-              <small class="field-help">关闭后，服务重启不会拉起任何隧道。</small>
-            </span>
-          </label>
-          <label class="field switch">
-            <input type="checkbox" id="set-autorestart">
-            <span>
-              进程异常退出时自动重启（指数退避）
-              <small class="field-help">连续失败 10 次后停止重试，避免无意义的循环。</small>
-            </span>
-          </label>
-          <label class="field">
-            <span>附加参数（高级）</span>
-            <input type="text" id="set-extra" placeholder="例如 --retries 5">
-            <small class="field-help">追加到每条 cloudflared 命令的全局参数，留空即可。</small>
-          </label>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h3>cloudflared 程序</h3>
-        </div>
-        <div class="card-body">
-          <div class="kv">
-            <div><span>当前版本</span><strong id="bin-version">—</strong></div>
-            <div><span>程序路径</span><code id="bin-path">—</code></div>
+      <div class="settings-grid">
+        <div class="card">
+          <div class="card-head">
+            <h3>连接</h3>
+            <span class="hint">影响 cloudflared 与 Cloudflare 边缘的通信方式</span>
           </div>
-          <p class="hint">应用升级会覆盖内置程序；此处更新仅对当前安装生效。</p>
-          <button class="btn" id="btn-update-bin">检查并更新到最新版</button>
+          <div class="card-body field-grid">
+            <label class="field">
+              <span>传输协议</span>
+              <select id="set-protocol">
+                <option value="auto">自动（推荐）</option>
+                <option value="http2">HTTP/2</option>
+                <option value="quic">QUIC</option>
+              </select>
+              <small class="field-help">UDP 被限制时选 HTTP/2。</small>
+            </label>
+            <label class="field">
+              <span>Edge IP 版本</span>
+              <select id="set-edge">
+                <option value="">默认</option>
+                <option value="4">仅 IPv4</option>
+                <option value="6">仅 IPv6</option>
+              </select>
+              <small class="field-help">只有纯 IPv6 或纯 IPv4 网络才需要指定。</small>
+            </label>
+            <label class="field">
+              <span>区域（region）</span>
+              <input type="text" id="set-region" placeholder="留空为自动，例如 us">
+              <small class="field-help">强制连接到指定区域的边缘节点。</small>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>日志与监控</h3>
+          </div>
+          <div class="card-body field-grid">
+            <label class="field">
+              <span>日志级别</span>
+              <select id="set-loglevel">
+                <option value="debug">debug</option>
+                <option value="info">info</option>
+                <option value="warn">warn</option>
+                <option value="error">error</option>
+              </select>
+              <small class="field-help">debug 会产生大量日志，仅在排查问题时使用。</small>
+            </label>
+            <label class="field">
+              <span>Metrics 端口</span>
+              <input type="number" id="set-metrics" min="0" max="65535" placeholder="0">
+              <small class="field-help">留 0 由 cloudflared 自动分配端口（从 20241 起依次尝试）。metrics 始终只监听 127.0.0.1，无法完全关闭；多个隧道请留 0，否则会争用同一端口。</small>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>行为</h3>
+          </div>
+          <div class="card-body">
+            <label class="field switch">
+              <input type="checkbox" id="set-autostart">
+              <span>
+                应用启动时自动启动已启用的隧道
+                <small class="field-help">关闭后，服务重启不会拉起任何隧道。</small>
+              </span>
+            </label>
+            <label class="field switch">
+              <input type="checkbox" id="set-autorestart">
+              <span>
+                进程异常退出时自动重启（指数退避）
+                <small class="field-help">连续失败 10 次后停止重试，避免无意义的循环。</small>
+              </span>
+            </label>
+            <label class="field">
+              <span>附加参数（高级）</span>
+              <input type="text" id="set-extra" placeholder="例如 --retries 5">
+              <small class="field-help">追加到每条 cloudflared 命令的全局参数，留空即可。</small>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>cloudflared 程序</h3>
+          </div>
+          <div class="card-body">
+            <div class="kv">
+              <div><span>当前版本</span><strong id="bin-version">—</strong></div>
+              <div><span>程序路径</span><code id="bin-path">—</code></div>
+            </div>
+            <p class="hint">应用升级会覆盖内置程序；此处更新仅对当前安装生效。</p>
+            <button class="btn" id="btn-update-bin">检查并更新到最新版</button>
+          </div>
         </div>
       </div>
     </section>
@@ -216,12 +220,16 @@
           <h2>应用运行日志</h2>
           <p class="hint" id="applog-meta">后端服务的运行记录，包含隧道启停与错误信息。</p>
         </div>
-        <div class="view-head-actions">
-          <button class="btn" id="btn-copy-applog">复制</button>
-          <button class="btn" id="btn-refresh-applog">刷新</button>
-        </div>
       </div>
-      <pre class="logbox" id="app-log" tabindex="0">加载中…</pre>
+      <div class="log-panel">
+        <div class="log-tools">
+          <span class="section-title">后端记录</span>
+          <button class="btn btn-sm" id="btn-applog-linenos" aria-pressed="false">行号</button>
+          <button class="btn btn-sm" id="btn-copy-applog">复制</button>
+          <button class="btn btn-sm" id="btn-refresh-applog">刷新</button>
+        </div>
+        <pre class="logbox applog" id="app-log" tabindex="0">加载中…</pre>
+      </div>
     </section>
   </main>
 

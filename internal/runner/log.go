@@ -116,6 +116,10 @@ func (m *Manager) observeLocked(id string, r *rec, line string) {
 	if errorRE.MatchString(line) && r.status == StatusStarting {
 		r.errMsg = truncateRunes(line, errorSampleRunes)
 	}
+	// A tunnel can be perfectly "running" at the edge while every request it
+	// forwards fails because the origin is down. That is invisible in the status
+	// field, so it gets its own slot.
+	m.noteOriginErrorLocked(r, line)
 }
 
 // Logs returns the tunnel's recent output: the in-memory ring first, and the

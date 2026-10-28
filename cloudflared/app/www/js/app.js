@@ -21,9 +21,16 @@
  * at the bottom.
  */
 
-import { state, $, toast, setBusy, isHidden } from './core.js';
+import { state, $, toast, setBusy, isHidden, copyText } from './core.js';
 import { api } from './api.js';
-import { renderTunnels, refreshTunnels, loadTunnelLog, logBoxFor, refreshMeta } from './render.js';
+import {
+  renderTunnels,
+  refreshTunnels,
+  loadTunnelLog,
+  logBoxFor,
+  refreshMeta,
+  applyLogNumbers,
+} from './render.js';
 import { openTunnelModal, closeTunnelModal, handleModalSave, trapModalFocus } from './modal.js';
 import {
   switchView,
@@ -79,6 +86,52 @@ async function tunnelAction(id, act) {
     return;
   }
 
+  /* Line numbers are a CSS counter on the boxes, so this only flips a class:
+     no list rebuild and no log repaint. */
+  if (act === 'linenos') {
+    state.logNumbers = !state.logNumbers;
+    applyLogNumbers();
+    return;
+  }
+
+  if (act === 'copy-log') {
+    const lines = state.logs[id] || [];
+    if (!lines.length) {
+      toast('还没有可复制的日志');
+      return;
+    }
+    try {
+      await copyText(lines.join('\n'));
+      toast('日志已复制');
+    } catch (err) {
+      toast('复制失败，请手动选中日志内容', 'err');
+    }
+    return;
+  }
+
+  /* "Test origin" asks the backend to dial the local origins now. The result
+     replaces the last known state so the card answers immediately instead of
+     waiting for the next poll to bring the same answer. */
+  if (act === 'probe') {
+    setBusy(key, true);
+    renderTunnels();
+    try {
+      const data = await api('POST', `/tunnels/${encodeURIComponent(id)}/probe`);
+      const origins = Array.isArray(data && data.origins) ? data.origins : [];
+      tunnel.origins = origins;
+      const bad = origins.filter((o) => o && o.ok === false);
+      if (!origins.length) toast('没有可探测的本地源站（Token 隧道的入站规则在云端）');
+      else if (bad.length) toast(`${bad.length} 个源站连不上`, 'err');
+      else toast(`全部 ${origins.length} 个源站可连`);
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      setBusy(key, false);
+      renderTunnels();
+    }
+    return;
+  }
+
   if (act === 'edit') {
     openTunnelModal(tunnel);
     return;
@@ -119,6 +172,19 @@ $('#tunnel-summary').addEventListener('click', (ev) => {
   renderTunnels();
 });
 
+/* A <details> toggle event does not bubble, so the fold state is captured on
+   the way down. Without this, a poll that rebuilds the list would shut a fold
+   the reader had just opened. */
+$('#tunnel-list').addEventListener(
+  'toggle',
+  (ev) => {
+    const fold = ev.target && ev.target.closest ? ev.target.closest('details[data-details]') : null;
+    if (!fold) return;
+    state.openDetails[fold.dataset.details] = fold.open;
+  },
+  true,
+);
+
 /* The modal footer serves the tunnel form and the one-line prompt; modal.js
    decides which one is open. */
 $('#modal-save').addEventListener('click', handleModalSave);
@@ -144,6 +210,10 @@ $('#btn-update-bin').addEventListener('click', updateBinary);
 
 $('#btn-refresh-applog').addEventListener('click', refreshAppLog);
 $('#btn-copy-applog').addEventListener('click', copyAppLog);
+$('#btn-applog-linenos').addEventListener('click', () => {
+  state.logNumbers = !state.logNumbers;
+  applyLogNumbers();
+});
 
 document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => switchView(tab.dataset.view));

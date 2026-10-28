@@ -20,6 +20,10 @@ var nodeViewKeys = []string{
 	"status", "pid", "url", "error", "startedAt", "stoppedAt", "lastExitCode",
 	"lastExitAt", "attempts", "dnsStatus", "dnsResults", "dnsMessage",
 	"dnsRunning",
+	// Added in 1.4.2. Deliberate additions, not renames: origin health is a
+	// separate concern from the tunnel's own status, because a tunnel can be
+	// connected at the edge while every forwarded request fails.
+	"originError", "origins",
 }
 
 func TestViewJSONMatchesLegacyShape(t *testing.T) {

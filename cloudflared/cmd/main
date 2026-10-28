@@ -126,15 +126,50 @@ cleanup_orphaned_cloudflared() {
     done
 }
 
+# Find a live instance of our server by scanning /proc.
+#
+# The PID file is the fast path, but it can be stale or missing: two concurrent
+# starts each rewrite it, so the loser's process keeps running while the file
+# names only one of them. Trusting the file alone then reported "not running"
+# while a server was very much alive, so every further start added yet another
+# instance -- and two cloudflared processes for the same tunnel fight over the
+# connection.
+find_running_server() {
+    local entry pid
+    for entry in /proc/[0-9]*; do
+        pid="${entry##*/}"
+        [ "${pid}" != "$$" ] || continue
+        if is_our_server "${pid}"; then
+            printf '%s' "${pid}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 server_running() {
     local pid
     pid=$(pid_from_file "${PID_FILE}")
-    check_process "${pid}" && is_our_server "${pid}"
+    if check_process "${pid}" && is_our_server "${pid}"; then
+        return 0
+    fi
+    # PID file missing or stale: fall back to the truth on disk.
+    find_running_server >/dev/null
 }
 
 # ------------------------------------------------------------------ lifecycle
 start_process() {
     if server_running; then
+        # Self-heal the PID file. It can be missing or name a dead process --
+        # that is exactly what makes the app centre believe the app is stopped,
+        # and every "start" it then issues would add another instance.
+        local live
+        live="$(find_running_server)"
+        if [ -n "${live}" ]; then
+            printf '%s\n' "${live}" >"${PID_FILE}"
+            chmod 644 "${PID_FILE}" 2>/dev/null || true
+            log_info "Service already running with PID ${live}, PID file repaired."
+        fi
         cleanup_orphaned_processes
         return 0
     fi
@@ -169,8 +204,7 @@ start_process() {
     local waited=0
     while [ "${waited}" -lt 10 ]; do
         if ! check_process "${new_pid}"; then
-            rm -f "${PID_FILE}"
-            fail "Cloudflare Tunnel 服务启动失败，请查看日志 ${LOG_FILE}。"
+            adopt_or_fail "${new_pid}"
         fi
         if [ -S "${SOCKET_PATH}" ] || [ "${waited}" -ge 3 ]; then
             break
@@ -180,12 +214,28 @@ start_process() {
     done
 
     if ! check_process "${new_pid}"; then
-        rm -f "${PID_FILE}"
-        fail "Cloudflare Tunnel 服务启动失败，请查看日志 ${LOG_FILE}。"
+        adopt_or_fail "${new_pid}"
     fi
 
     log_info "Service started with PID ${new_pid}."
     return 0
+}
+
+# The spawned process exited. That is either a real failure, or the benign race
+# where another instance already holds the single-instance lock and this one
+# stood down -- in which case the service is running and the start succeeded.
+adopt_or_fail() {
+    local attempted="$1"
+    rm -f "${PID_FILE}"
+    local live
+    live="$(find_running_server)"
+    if [ -n "${live}" ] && [ "${live}" != "${attempted}" ]; then
+        printf '%s\n' "${live}" >"${PID_FILE}"
+        chmod 644 "${PID_FILE}" 2>/dev/null || true
+        log_info "Another instance (PID ${live}) already owns the service; start satisfied."
+        return 0
+    fi
+    fail "Cloudflare Tunnel 服务启动失败，请查看日志 ${LOG_FILE}。"
 }
 
 stop_process() {

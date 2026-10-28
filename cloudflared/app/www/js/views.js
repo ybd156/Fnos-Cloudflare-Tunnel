@@ -7,9 +7,9 @@
  * app.js, which keeps the DOM contract in one place.
  */
 
-import { state, $, toast } from './core.js';
+import { state, $, toast, copyText } from './core.js';
 import { api } from './api.js';
-import { esc, refreshTunnels, refreshMeta } from './render.js';
+import { esc, refreshTunnels, refreshMeta, paintLog } from './render.js';
 import { openTunnelModal, openPromptModal, closeTunnelModal } from './modal.js';
 
 /* ── account view ─────────────────────────────────────────────────────── */
@@ -258,41 +258,31 @@ export async function updateBinary() {
 
 /* ── app log view ─────────────────────────────────────────────────────── */
 
-let lastAppLogText = null;
-
+/* The log is painted through the same in-place painter the tunnel cards use,
+   so both panels get error highlighting, line numbers and the "follow the tail
+   only when already at the bottom" rule from one implementation. */
 export async function refreshAppLog() {
   const box = $('#app-log');
   try {
     const data = await api('GET', '/logs');
     const lines = data.lines || [];
-    const text = lines.length ? lines.join('\n') : '暂无日志';
-    if (text !== lastAppLogText) {
-      const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-      box.textContent = text;
-      lastAppLogText = text;
-      if (atBottom) box.scrollTop = box.scrollHeight;
-    }
+    state.appLogLines = lines;
+    paintLog(box, lines);
     const meta = $('#applog-meta');
     if (meta) meta.textContent = `共 ${lines.length} 行 · 更新于 ${new Date().toLocaleTimeString('zh-CN')}`;
   } catch (err) {
-    box.textContent = `读取失败：${err.message}`;
-    lastAppLogText = null;
+    state.appLogLines = [];
+    paintLog(box, [`读取失败：${err.message}`]);
   }
 }
 
 export async function copyAppLog() {
-  const text = $('#app-log').textContent || '';
+  /* Read from the model, not from the DOM: the painted lines are elements, and
+     the textContent of a run of block-level spans has no newlines in it. */
+  const lines = state.appLogLines || [];
+  const text = lines.length ? lines.join('\n') : ($('#app-log').textContent || '');
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    }
+    await copyText(text);
     toast('日志已复制');
   } catch (err) {
     toast('复制失败，请手动选中日志内容', 'err');

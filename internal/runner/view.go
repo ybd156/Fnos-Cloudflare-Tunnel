@@ -52,6 +52,11 @@ type View struct {
 	DNSResults      *DNSResults      `json:"dnsResults"`
 	DNSMessage      string           `json:"dnsMessage"`
 	DNSRunning      bool             `json:"dnsRunning"`
+
+	// Origin health. Both are always present so the UI can tell "no problem"
+	// from "this field does not exist yet" without guessing.
+	OriginError *OriginError   `json:"originError"`
+	Origins     []OriginStatus `json:"origins"`
 }
 
 // View renders one tunnel for the API. It creates the runtime record if the
@@ -92,6 +97,14 @@ func (m *Manager) View(t config.Tunnel) View {
 		DNSStatus:  r.dnsStatus,
 		DNSMessage: r.dnsMessage,
 		DNSRunning: r.dnsRunning,
+
+		Origins: originCopy(r.origins),
+	}
+	if r.originErr != nil {
+		// Copy: the record may be overwritten by the next log line while the
+		// response is being serialised.
+		e := *r.originErr
+		v.OriginError = &e
 	}
 	if r.pid > 0 {
 		pid := r.pid
@@ -120,6 +133,15 @@ func (m *Manager) Running(id string) bool {
 		return false
 	}
 	return r.child != nil
+}
+
+// originCopy returns the probe results, always as a non-nil slice: the UI reads
+// .length and a null would need special-casing.
+func originCopy(in []OriginStatus) []OriginStatus {
+	if len(in) == 0 {
+		return []OriginStatus{}
+	}
+	return append([]OriginStatus(nil), in...)
 }
 
 func ingressCopy(in []config.Ingress) []config.Ingress {

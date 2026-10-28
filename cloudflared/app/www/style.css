@@ -37,6 +37,10 @@
   --err-soft: rgba(220, 38, 38, 0.11);
   --info: #2563eb;
   --info-soft: rgba(37, 99, 235, 0.11);
+  /* Header washes for cards that need attention. Much lighter than the -soft
+     tokens: they sit behind a whole header row, not a single alert. */
+  --tint-warn: rgba(180, 83, 9, 0.07);
+  --tint-err: rgba(220, 38, 38, 0.06);
 
   /* shape + depth */
   --radius-lg: 14px;
@@ -50,6 +54,21 @@
   --gap: 14px;
   --pad-card: 16px;
   --topbar-h: 58px;
+
+  /* terminal — the log panels keep their own palette in both themes: a log is
+     read as a log, and a light-on-dark block is what makes error lines pop. */
+  --log-bg: #0e1116;
+  --log-fg: #d3d9e2;
+  --log-dim: #6b7686;
+  --log-rule: #1c222b;
+  --log-err: #ff8f8f;
+  --log-err-bg: rgba(248, 113, 113, 0.1);
+  --log-warn: #f2c14e;
+  --log-warn-bg: rgba(242, 193, 78, 0.09);
+  /* The tunnel log is a fixed height on purpose: a max-height box grows line by
+     line and moves the whole card on every poll. */
+  --log-tunnel-h: 320px;
+  --log-app-h: 460px;
 
   /* motion — respected by the reduced-motion block at the end */
   --t-fast: 0.13s ease;
@@ -76,6 +95,8 @@
     --err-soft: rgba(248, 113, 113, 0.14);
     --info: #60a5fa;
     --info-soft: rgba(96, 165, 250, 0.14);
+    --tint-warn: rgba(251, 191, 36, 0.09);
+    --tint-err: rgba(248, 113, 113, 0.09);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 3px 10px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 14px 38px rgba(0, 0, 0, 0.55);
@@ -409,6 +430,57 @@ main {
   background: var(--text-faint);
 }
 
+/* ── health banner ───────────────────────────────────────────────────────── */
+
+/* One line for the whole page: the tunnel list can be long, and "the service
+   behind it is dead" is not visible from a green status pill. Amber, not red:
+   nothing here is broken in the app itself. */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 14px;
+  margin-bottom: var(--gap);
+  border-radius: var(--radius);
+  border: 1px solid var(--warn);
+  border-left: 3px solid var(--warn);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.banner-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  /* Not `currentColor`: the glyph colour is the surface, so an inherited
+     background would paint the "!" in its own colour and hide it. */
+  background: var(--warn);
+  color: var(--surface);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+.banner-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.banner-text strong {
+  color: var(--warn);
+}
+
+.banner-sub {
+  color: var(--text-dim);
+  font-size: 12px;
+  word-break: break-word;
+}
+
 /* ── card ────────────────────────────────────────────────────────────────── */
 
 .card {
@@ -457,7 +529,7 @@ main {
 }
 
 .tunnel-card:hover {
-  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
 }
 
 .tunnel-card.is-running {
@@ -475,6 +547,25 @@ main {
 
 .tunnel-card.is-stopped {
   border-left-color: var(--border-strong);
+}
+
+/* A running tunnel with a dead origin is the case this card exists to make
+   obvious, so the accent bar follows the origin, not just the process state.
+   Declared after the status rules so it wins the tie on equal specificity. */
+.tunnel-card.has-origin-error,
+.tunnel-card.is-running.has-origin-error {
+  border-left-color: var(--warn);
+}
+
+/* A card that needs attention is visible before its badges are read: the head
+   carries the tint. Declared after the origin rule so a dead process (the more
+   severe state) wins when both apply. */
+.tunnel-card.has-origin-error > .card-head {
+  background: var(--tint-warn);
+}
+
+.tunnel-card.is-error > .card-head {
+  background: var(--tint-err);
 }
 
 .tunnel-card .card-head {
@@ -508,6 +599,14 @@ main {
 
 .badge.mono {
   font-size: 11px;
+}
+
+/* Sits next to the status pill so "running" and "origin is down" are read at
+   the same time, in the same place. */
+.badge-warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
 }
 
 .status {
@@ -585,6 +684,50 @@ main {
 
 .meta-grid .value {
   word-break: break-word;
+}
+
+/* ── card facts ──────────────────────────────────────────────────────────── */
+
+/* The first screen of a card: how long it has been up, where it points, and
+   whether the thing behind it answers. Everything else folds away below. */
+.tunnel-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 9px;
+}
+
+.fact {
+  display: grid;
+  gap: 1px;
+  padding: 9px 11px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+
+.fact-label {
+  color: var(--text-faint);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.fact-value {
+  font-size: 13px;
+  word-break: break-word;
+  min-width: 0;
+}
+
+.fact-sub {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  word-break: break-word;
+}
+
+/* Relative stamps are rewritten in place by refreshRelTimes(). Tabular figures
+   keep the text from changing width as "9 秒前" becomes "10 秒前". */
+.rel {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── account rows ────────────────────────────────────────────────────────── */
@@ -817,6 +960,20 @@ input[type="checkbox"] {
   gap: 16px 18px;
 }
 
+/* Settings as a board: two columns on a wide window, one on a narrow one. The
+   cards are independent groups, so nothing is lost by placing them side by
+   side -- unlike a single long form, which reads as one undifferentiated list. */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  gap: var(--gap);
+  align-items: start;
+}
+
+.settings-grid > .card {
+  margin-bottom: 0;
+}
+
 .form-grid {
   display: grid;
   gap: 15px;
@@ -966,36 +1123,325 @@ input[type="checkbox"] {
   padding: 18px;
 }
 
-/* ── log boxes ───────────────────────────────────────────────────────────── */
+/* ── log panels ──────────────────────────────────────────────────────────── */
+
+/* Both log surfaces are terminals: a caption strip with the reading aids, then
+   a scroll box with a *fixed* height.
+ *
+ * The fixed height is the second half of the "UI twitches while the log
+ * updates" fix. With max-height the box started a few lines tall and grew
+ * towards the cap as lines arrived, so every poll moved the card -- and the
+ * cursor -- up and down. A fixed height means the box is its final size the
+ * moment it appears. */
+.log-panel {
+  margin-top: 14px;
+}
+
+.log-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+/* Pushes the buttons to the right edge, so the caption reads as a heading. */
+.log-tools .section-title {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.log-tools .section-title::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--primary);
+  flex: none;
+}
+
+.log-tools .btn.is-active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
 
 .logbox {
-  background: #0e1116;
-  color: #d3d9e2;
+  background: var(--log-bg);
+  color: var(--log-fg);
   border-radius: var(--radius);
   border: 1px solid var(--border);
-  padding: 13px 15px;
+  padding: 12px 14px;
   margin: 0;
   font-size: 12px;
   line-height: 1.65;
-  max-height: 460px;
+  height: var(--log-app-h);
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   tab-size: 4;
+  overscroll-behavior: contain;
 }
 
+.logbox:focus-visible {
+  outline-offset: 1px;
+}
+
+/* The tunnel log sits inside a card, where a 460px block would dominate the
+   page. Fixed, not max-height -- see above. */
 .tunnel-log {
-  margin-top: 13px;
-  max-height: 320px;
+  height: var(--log-tunnel-h);
 }
 
-.log-meta {
+/* One line, one element: it lets an error row be tinted and numbered without
+   turning the log back into a single text node. */
+.log-line {
+  display: block;
+  padding: 0 6px;
+  border-radius: 3px;
+  margin: 0 -6px;
+}
+
+.log-line.is-err {
+  color: var(--log-err);
+  background: var(--log-err-bg);
+}
+
+.log-line.is-warn {
+  color: var(--log-warn);
+  background: var(--log-warn-bg);
+}
+
+/* Line numbers are a CSS counter, so turning them on is a class on the box
+   rather than a repaint of every line. A grid puts the number in its own
+   column, which keeps a wrapped line aligned with the text above it instead of
+   running back under the gutter. */
+.logbox.linenos {
+  counter-reset: logline;
+}
+
+.logbox.linenos .log-line {
+  counter-increment: logline;
+  display: grid;
+  grid-template-columns: 3.2em minmax(0, 1fr);
+  column-gap: 10px;
+}
+
+.logbox.linenos .log-line::before {
+  content: counter(logline);
+  text-align: right;
+  color: var(--log-dim);
+  border-right: 1px solid var(--log-rule);
+  padding-right: 9px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The app-wide log gets more room: it is the whole point of its own tab. */
+.applog {
+  height: var(--log-app-h);
+}
+
+/* ── origin health ───────────────────────────────────────────────────────── */
+
+/* "Connected to Cloudflare" and "the service behind it answers" are two
+   different facts, and conflating them is what makes a 502 look like a bug in
+   this app. The panel keeps the second one visible on every card. */
+.origin-panel {
+  margin-top: 13px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+/* The panel itself stays neutral even when the origin is down: the alert
+   inside carries the colour, and a tinted panel behind a tinted alert would
+   stack two washes into one loud block. */
+.origin-panel.is-bad {
+  border-color: var(--warn);
+  background: var(--surface-2);
+}
+
+.origin-head {
   display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 8px;
-  color: var(--text-faint);
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.origin-head .btn {
+  margin-left: auto;
+}
+
+.origin-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11.5px;
+  font-weight: 500;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.origin-flag::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.origin-flag.is-ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.origin-flag.is-bad {
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.origin-flag.is-unknown {
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+
+.origin-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.origin-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.origin-row.is-bad {
+  border-color: var(--err);
+}
+
+.origin-host {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.origin-sep {
+  color: var(--text-faint);
+}
+
+.origin-service {
+  font-size: 11.5px;
+  word-break: break-all;
+}
+
+.origin-detail {
+  display: block;
+  flex-basis: 100%;
+  color: var(--err);
+  font-size: 11.5px;
+  word-break: break-word;
+}
+
+.origin-alert .origin-detail {
+  color: inherit;
+  opacity: 0.85;
+}
+
+.origin-alert .alert-body {
+  display: grid;
+  gap: 3px;
+}
+
+/* The warning states the problem rather than shouting it: an amber rule on the
+   left and an amber headline, with the details in ordinary text. A full amber
+   wash read as a solid block in the dark theme and buried the detail lines.
+   The extra classes are needed to outrank .alert.warn, which is declared
+   later in this file. */
+.origin-panel .alert.origin-alert {
+  background: var(--surface);
+  border-left: 3px solid var(--warn);
+  color: var(--text);
+}
+
+.origin-panel .alert.origin-alert strong {
+  color: var(--warn);
+}
+
+.origin-panel .alert.origin-alert .origin-detail {
+  color: var(--text-dim);
+  opacity: 1;
+}
+
+.origin-note {
+  margin-top: 9px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.origin-note .origin-detail {
+  color: var(--text-dim);
+}
+
+/* ── card fold ───────────────────────────────────────────────────────────── */
+
+/* Secondary fields fold away by default: the card's first screen is the three
+   facts that answer "is it up", "where does it point" and "is the origin
+   alive", not a table of every field. */
+.card-more {
+  margin-top: 13px;
+  border-top: 1px solid var(--border);
+  padding-top: 11px;
+}
+
+.card-more > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.card-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.card-more > summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--text-faint);
+  transition: transform var(--t-fast);
+}
+
+.card-more[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.card-more > summary:hover {
+  color: var(--text);
+}
+
+.card-more .meta-grid {
+  margin-top: 11px;
 }
 
 /* ── toast ───────────────────────────────────────────────────────────────── */
@@ -1180,6 +1626,14 @@ input[type="checkbox"] {
   .search {
     width: 100%;
   }
+
+  .tunnel-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 560px) {
@@ -1189,6 +1643,20 @@ input[type="checkbox"] {
 
   .view-head-actions .btn {
     flex: 1 1 auto;
+  }
+
+  /* Still a fixed height -- just a shorter one that fits a phone screen. */
+  .tunnel-log {
+    height: 240px;
+  }
+
+  .applog {
+    height: 340px;
+  }
+
+  .origin-head .btn {
+    margin-left: 0;
+    width: 100%;
   }
 
   .service-row {

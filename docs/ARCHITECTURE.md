@@ -206,6 +206,7 @@ func (m *Manager) Stop(id string)
 func (m *Manager) StopAll()
 func (m *Manager) Forget(id string)
 func (m *Manager) Running(id string) bool            // 是否有存活子进程（PUT 判断要不要重启）
+func (m *Manager) ProbeOrigins(id string) []OriginStatus  // 主动探测源站（未知 id 返回 nil 且不留记录）
 func (m *Manager) View(t config.Tunnel) View
 func (m *Manager) Logs(id string, limit int) []string
 func (m *Manager) ApplyLocalConfig(t config.Tunnel)

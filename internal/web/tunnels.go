@@ -9,6 +9,7 @@ import (
 	"github.com/ybd156/fnos-cloudflared/internal/config"
 	"github.com/ybd156/fnos-cloudflared/internal/fsx"
 	"github.com/ybd156/fnos-cloudflared/internal/paths"
+	"github.com/ybd156/fnos-cloudflared/internal/runner"
 )
 
 // handleTunnels serves /api/tunnels and /api/tunnels/<id>[/<action>].
@@ -37,6 +38,8 @@ func (s *Server) handleTunnels(w http.ResponseWriter, r *http.Request, id, actio
 			s.restartTunnel(w, r, id)
 		case "logs":
 			s.tunnelLogs(w, r, id)
+		case "probe":
+			s.probeOrigin(w, r, id)
 		default:
 			sendError(w, http.StatusNotFound, "接口不存在")
 		}
@@ -191,6 +194,27 @@ func (s *Server) tunnelLogs(w http.ResponseWriter, r *http.Request, id string) {
 		lines = []string{}
 	}
 	sendJSON(w, http.StatusOK, map[string]any{"lines": lines})
+}
+
+// probeOrigin dials the tunnel's known ingress origins on demand.
+//
+// This exists because "the tunnel is running" is not the same as "the service
+// behind it answers": cloudflared reports a healthy tunnel even when every
+// forwarded request gets a connection refused from the origin.
+func (s *Server) probeOrigin(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		sendError(w, http.StatusNotFound, "接口不存在")
+		return
+	}
+	if _, ok := s.Store.Tunnel(id); !ok {
+		sendError(w, http.StatusNotFound, "隧道不存在")
+		return
+	}
+	origins := s.Run.ProbeOrigins(id)
+	if origins == nil {
+		origins = []runner.OriginStatus{}
+	}
+	sendJSON(w, http.StatusOK, map[string]any{"ok": true, "origins": origins})
 }
 
 func (s *Server) getTunnel(w http.ResponseWriter, r *http.Request, id string) {

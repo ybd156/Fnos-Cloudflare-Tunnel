@@ -560,6 +560,83 @@ func TestMalformedPercentEncodingDoesNotCrash(t *testing.T) {
 	}
 }
 
+/* --------------------------------------------------------------- 源站探测 */
+
+func TestProbeEndpointForUnknownTunnel(t *testing.T) {
+	f := newFixture(t)
+	rec := f.do(t, http.MethodPost, "/api/tunnels/ghost/probe", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("未知隧道应 404，得到 %d", rec.Code)
+	}
+}
+
+func TestProbeEndpointReportsOrigins(t *testing.T) {
+	f := newFixture(t)
+	// A locally-managed tunnel with one origin. Port 1 is closed in any test
+	// environment, which is exactly the "origin down" case this feature exists
+	// to surface.
+	created := decodeJSON(t, f.do(t, http.MethodPost, "/api/tunnels", `{
+		"name":"本地","type":"local","tunnelName":"nas",
+		"ingress":[{"hostname":"a.example.com","service":"http://127.0.0.1:1"}]}`))["tunnel"].(map[string]any)
+	id := created["id"].(string)
+
+	rec := f.do(t, http.MethodPost, "/api/tunnels/"+id+"/probe", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("期望 200，得到 %d: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeJSON(t, rec)
+	if body["ok"] != true {
+		t.Error("应返回 ok=true（接口本身成功）")
+	}
+	origins, ok := body["origins"].([]any)
+	if !ok {
+		t.Fatalf("应返回 origins 数组: %q", rec.Body.String())
+	}
+	if len(origins) != 1 {
+		t.Fatalf("应探测 1 个源站，得到 %d", len(origins))
+	}
+	first := origins[0].(map[string]any)
+	if first["service"] != "http://127.0.0.1:1" {
+		t.Errorf("service 不符: %v", first["service"])
+	}
+	if first["ok"] != false {
+		t.Error("端口 1 不应可连")
+	}
+	if msg, _ := first["error"].(string); msg == "" {
+		t.Error("失败时应给出原因")
+	}
+}
+
+func TestProbeEndpointRequiresPost(t *testing.T) {
+	f := newFixture(t)
+	created := decodeJSON(t, f.do(t, http.MethodPost, "/api/tunnels",
+		`{"name":"a","type":"token","token":"tok"}`))["tunnel"].(map[string]any)
+	id := created["id"].(string)
+	rec := f.do(t, http.MethodGet, "/api/tunnels/"+id+"/probe", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GET 应 404，得到 %d", rec.Code)
+	}
+}
+
+func TestTunnelViewCarriesOriginFields(t *testing.T) {
+	f := newFixture(t)
+	created := decodeJSON(t, f.do(t, http.MethodPost, "/api/tunnels",
+		`{"name":"a","type":"token","token":"tok"}`))["tunnel"].(map[string]any)
+
+	// Both fields must always be present so the UI can tell "no problem" from
+	// "this build does not report it".
+	if _, exists := created["originError"]; !exists {
+		t.Error("隧道对象应包含 originError 字段")
+	}
+	origins, exists := created["origins"]
+	if !exists {
+		t.Fatal("隧道对象应包含 origins 字段")
+	}
+	if _, ok := origins.([]any); !ok {
+		t.Errorf("origins 应为数组（即使为空），得到 %T", origins)
+	}
+}
+
 /* ----------------------------------------------------------------- 账户 */
 
 func TestAccountStatusWhenLoggedOut(t *testing.T) {

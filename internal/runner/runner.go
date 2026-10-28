@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -81,6 +82,9 @@ type Manager struct {
 
 	spawn spawnFunc
 	now   func() time.Time
+	// dial is the TCP dial used to probe an origin service. Injected so tests can
+	// exercise both the reachable and unreachable paths without real sockets.
+	dial func(addr string, timeout time.Duration) (net.Conn, error)
 
 	// Policy knobs, initialised from paths so tests can compress the clock.
 	baseDelay   time.Duration
@@ -131,6 +135,14 @@ type rec struct {
 	dnsMessage string
 	dnsRunning bool
 
+	// Origin health. origins is the last active probe (empty when the ingress
+	// rules are not known locally, as for token tunnels); originErr is the last
+	// "cannot reach the origin" line cloudflared printed, which is available for
+	// every tunnel type.
+	origins   []OriginStatus
+	originsAt time.Time
+	originErr *OriginError
+
 	// pendingRestart records that a graceful stop is in flight and the tunnel
 	// should be launched again once the old child is really gone.
 	pendingRestart bool
@@ -160,6 +172,9 @@ func newManager(p paths.Paths, log *applog.Logger, store *config.Store, cfr cfRu
 
 		spawn: spawnExec,
 		now:   time.Now,
+		dial: func(addr string, timeout time.Duration) (net.Conn, error) {
+			return net.DialTimeout("tcp", addr, timeout)
+		},
 
 		baseDelay:   time.Duration(paths.RestartBaseMS) * time.Millisecond,
 		maxDelay:    time.Duration(paths.RestartMaxMS) * time.Millisecond,
@@ -264,6 +279,9 @@ func (m *Manager) start(id string, keepAttempts bool) error {
 	r.errMsg = ""
 	r.url = ""
 	r.log.reset()
+	// A restart is a new attempt: the previous attempt's origin error no longer
+	// describes this process.
+	r.originErr = nil
 	r.startedAt = m.stampISO()
 	m.mu.Unlock()
 
@@ -324,6 +342,9 @@ func (m *Manager) start(id string, keepAttempts bool) error {
 
 	// 本地管理隧道：顺便把 ingress 里的域名 CNAME 到隧道（幂等，失败不影响启动）。
 	m.RunDNSRoutes(id, false)
+
+	// 源站健康：隧道连上 Cloudflare 不代表源站活着，这里开始按固定间隔探测。
+	m.watchOrigins(id, r, rn, tunnel)
 
 	return nil
 }

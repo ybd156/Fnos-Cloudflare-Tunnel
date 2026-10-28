@@ -1,9 +1,10 @@
 /*
  * Shared UI state and the few helpers every other module needs.
  *
- * This module is why the split needs no import cycles: state, the `$` lookup
- * and the toast strip are the only things the renderer, the modal and the
- * per-view modules have in common. The dependency graph is a straight line
+ * This module is why the split needs no import cycles: state, the `$` lookup,
+ * the toast strip and the clipboard fallback are the only things the renderer,
+ * the modal and the per-view modules have in common. The dependency graph is a
+ * straight line
  *
  *     core <- api <- render <- modal <- views <- app
  *
@@ -22,7 +23,14 @@ export const state = {
   editing: null,
   filter: 'all',
   logs: {},
+  appLogLines: [],
   openLogs: {},
+  /* Which cards have their "more information" fold open. Kept here so a poll
+     that rebuilds the list does not slam the fold shut under the reader. */
+  openDetails: {},
+  /* Line numbers are a reading aid, not a per-tunnel setting: one switch for
+     every log box keeps the cards from disagreeing with each other. */
+  logNumbers: false,
   busy: {},
 };
 
@@ -49,4 +57,25 @@ export function isBusy(key) {
    no one reading it, and on a NAS the wakeups are pure waste. */
 export function isHidden() {
   return document.visibilityState === 'hidden';
+}
+
+/* Copying to the clipboard has to work on plain http (a NAS on the LAN is not
+   a secure context), where navigator.clipboard does not exist. The textarea
+   fallback is the only path that works there. */
+export async function copyText(text) {
+  const body = String(text == null ? '' : text);
+  if (navigator.clipboard && navigator.clipboard.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(body);
+    return;
+  }
+  const area = document.createElement('textarea');
+  area.value = body;
+  area.setAttribute('readonly', '');
+  area.style.position = 'fixed';
+  area.style.top = '-1000px';
+  document.body.appendChild(area);
+  area.select();
+  const ok = document.execCommand('copy');
+  area.remove();
+  if (!ok) throw new Error('浏览器拒绝了复制操作');
 }
