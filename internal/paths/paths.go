@@ -8,6 +8,7 @@
 package paths
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -135,14 +136,24 @@ func Rooted(root string) Paths {
 // entry point for directory creation: when it silently did nothing, saving a
 // tunnel, writing config.yml, logging in and writing logs all failed after a
 // fresh install, with no single place to see why.
+//
+// Every directory is attempted even if an earlier one fails. Returning on the
+// first failure meant one unusable path (an unset TRIM_PKGTMP on a host where
+// /var/apps cannot be created, for example) also prevented the data directory
+// from being created, which took the whole service down with a misleading error.
 func (p Paths) EnsureDirs() error {
+	var firstErr error
 	for _, dir := range []string{p.PkgVar, p.PkgTmp, p.CFDir, p.TunnelsDir, p.LogsDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+		if err := os.MkdirAll(dir, 0o755); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("创建目录 %s 失败: %w", dir, err)
 		}
 	}
-	// Credentials and cert.pem live here; keep the directory private.
-	return os.Chmod(p.CFDir, 0o700)
+	// Credentials and cert.pem live here; keep the directory private. A failure
+	// here is not fatal: the files themselves are written 0600.
+	if err := os.Chmod(p.CFDir, 0o700); err != nil && firstErr == nil && !os.IsNotExist(err) {
+		firstErr = fmt.Errorf("设置目录权限 %s 失败: %w", p.CFDir, err)
+	}
+	return firstErr
 }
 
 // TunnelConfig is the generated config.yml for a locally-managed tunnel.
