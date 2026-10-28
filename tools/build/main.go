@@ -79,6 +79,21 @@ type pipeline struct {
 	skipPack  bool
 }
 
+// scratchDir returns a writable directory for tools that unpack into $TMPDIR.
+//
+// The host temp directory is not always usable (a locked-down Windows profile
+// denies it outright, and fnpack then fails with a bare "Access is denied").
+// Keeping the scratch area inside the checkout makes the build independent of
+// the host's TMP configuration.
+func (p *pipeline) scratchDir() (string, error) {
+	dir := filepath.Join(p.root, "work", "tmp")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	// A stale tree from an interrupted build would otherwise be reused.
+	return dir, nil
+}
+
 func main() {
 	var (
 		noIcons = flag.Bool("no-icons", false, "skip icon regeneration")
@@ -228,6 +243,13 @@ func (p *pipeline) run(fnpackFlag string) error {
 	cmd.Dir = p.dist // fnpack writes <appname>.fpk into the working directory
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	// fnpack unpacks into $TMPDIR. When that location is not writable it fails
+	// with a bare "Access is denied" that says nothing about the cause, so give
+	// it a scratch directory inside the checkout instead of inheriting whatever
+	// the host points at.
+	if tmp, tmpErr := p.scratchDir(); tmpErr == nil {
+		cmd.Env = envWith(os.Environ(), "TMPDIR="+tmp, "TMP="+tmp, "TEMP="+tmp)
+	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("fnpack build failed: %w", err)
 	}

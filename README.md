@@ -94,6 +94,19 @@ pwsh -File build.ps1
 pwsh -File build.ps1 -NoIcons -Fnpack C:\tools\fnpack-1.2.4.exe
 ```
 
+> **在 Windows 上建议改用 WSL 构建。** 目标平台是 Linux，在 WSL 里构建能省掉
+> 整类 Windows 特有的麻烦：`chmod` 有真实的权限位（归档不需要再归一化，实测
+> Linux 上修正 0 个、Windows 上要修正 23+23 个）、`bash -n` 能真跑、`fnpack`
+> 用官方 Linux 版、也不受 `%TEMP%` 不可写的影响。
+>
+> ```bash
+> wsl -e bash -lc 'cd ~/fncfd-build && ./build.sh'
+> ```
+>
+> 官方 Linux 版 fnpack：`https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64`。
+> Windows 路径仍然受支持（`build.ps1` 会自动把临时目录指到 `work/tmp`），只是
+> 多一道权限位修正。
+
 两个脚本都只是**薄封装**：解析自己的参数、定位 `go` 与 `fnpack`，然后转调
 `go run ./tools/build`。流水线只存在一份，不会像 1.4.1 那样两份脚本各自漂移。
 
