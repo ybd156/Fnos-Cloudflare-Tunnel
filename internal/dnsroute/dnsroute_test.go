@@ -534,3 +534,100 @@ func TestCacheKeyIsUnambiguous(t *testing.T) {
 		t.Fatal("cache key lost the tunnel name")
 	}
 }
+
+/* ---------------------------------------------- DoH 不可达时的系统解析器回退 */
+
+// failingDoH points the resolver at a DoH endpoint that always fails, the way a
+// network that resets connections to cloudflare-dns.com does.
+func failingDoH(t *testing.T, res *Resolver) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "reset", http.StatusBadGateway)
+	}))
+	t.Cleanup(srv.Close)
+	res.dohEndpoint = srv.URL
+}
+
+// TestLookupCNAMEFallsBackToSystemResolver covers a real NAS: DoH to
+// cloudflare-dns.com is reset by the network, so every lookup failed and every
+// start re-issued `tunnel route dns` for all three hostnames.
+func TestLookupCNAMEFallsBackToSystemResolver(t *testing.T) {
+	res, _ := newTestResolver(t)
+	failingDoH(t, res)
+	res.systemLookup = func(hostname string) (string, error) {
+		return "ead489d1.cfargotunnel.com.", nil
+	}
+
+	got, err := res.LookupCNAME("nas.example.com")
+	if err != nil {
+		t.Fatalf("DoH 失败时应回退到系统解析器，得到错误: %v", err)
+	}
+	if got != "ead489d1.cfargotunnel.com" {
+		t.Errorf("应返回系统解析器的结果（去掉尾点），得到 %q", got)
+	}
+}
+
+// TestLookupCNAMEFallbackReportsNoCNAME: the system resolver returning the name
+// itself means there is no CNAME, which must trigger a route rather than look
+// like a correct one.
+func TestLookupCNAMEFallbackReportsNoCNAME(t *testing.T) {
+	res, _ := newTestResolver(t)
+	failingDoH(t, res)
+	res.systemLookup = func(hostname string) (string, error) {
+		return hostname + ".", nil
+	}
+
+	got, err := res.LookupCNAME("nas.example.com")
+	if err != nil {
+		t.Fatalf("不应报错: %v", err)
+	}
+	if got != "" {
+		t.Errorf("没有 CNAME 时应返回空字符串，得到 %q", got)
+	}
+}
+
+func TestLookupCNAMEBothResolversFail(t *testing.T) {
+	res, _ := newTestResolver(t)
+	failingDoH(t, res)
+	res.systemLookup = func(string) (string, error) {
+		return "", errors.New("no such host")
+	}
+
+	_, err := res.LookupCNAME("nas.example.com")
+	if err == nil {
+		t.Fatal("两个解析器都失败时应返回错误")
+	}
+	// The DoH message names the real cause; a generic "no such host" would hide it.
+	if err.Error() != "DNS 查询失败 (HTTP 502)" {
+		t.Errorf("应报告 DoH 的失败原因，得到 %q", err.Error())
+	}
+}
+
+// TestEnsureRoutesWhenDoHIsBlocked is the end-to-end version: with DoH down the
+// check must still reach a decision instead of silently re-routing forever.
+func TestEnsureRoutesWhenDoHIsBlocked(t *testing.T) {
+	res, h := newTestResolver(t)
+	// Ensure() refuses to touch DNS without an account certificate.
+	writeCert(t, h)
+	failingDoH(t, res)
+	res.systemLookup = func(string) (string, error) {
+		// Must match what Ensure() expects: <uuid>.cfargotunnel.com.
+		return testUUID + ".cfargotunnel.com.", nil
+	}
+	var routed []string
+	res.routeFn = func(name, hostname string) error {
+		routed = append(routed, hostname)
+		return nil
+	}
+
+	out := res.Ensure(localTunnel())
+	if !out.OK {
+		t.Fatalf("应判定成功，得到 %+v", out)
+	}
+	if len(routed) != 0 {
+		t.Errorf("系统解析器已确认 CNAME 正确，不应再下发路由，实际下发了 %v", routed)
+	}
+	if len(out.AlreadyOK) != 2 {
+		t.Errorf("两个域名都应报告为正确，得到 %+v", out.AlreadyOK)
+	}
+}

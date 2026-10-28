@@ -10,6 +10,7 @@ package dnsroute
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -75,6 +76,8 @@ type Resolver struct {
 	dohEndpoint string
 	routeFn     func(name, hostname string) error
 	now         func() time.Time
+	// systemLookup is the fallback resolver used when DoH is unreachable.
+	systemLookup func(hostname string) (string, error)
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
@@ -241,9 +244,54 @@ func (r *Resolver) route(name, hostname string) error {
 	return r.runner.RouteDNS(name, hostname)
 }
 
-// LookupCNAME asks Cloudflare's DoH endpoint for the CNAME of hostname. It
-// returns "" and no error when the name has no CNAME at all.
+// LookupCNAME resolves the CNAME of hostname, preferring DNS-over-HTTPS and
+// falling back to the system resolver.
+//
+// DoH is the more precise source, but it is not always reachable: on a NAS
+// behind a network that resets connections to cloudflare-dns.com, every lookup
+// fails. Treating that as "there is no CNAME" made every start re-issue
+// `tunnel route dns --overwrite-dns` -- an extra API call plus a few seconds of
+// retries per hostname, on every single start, while masking the real state.
+// The system resolver answers the same question using whatever DNS the host
+// already has.
 func (r *Resolver) LookupCNAME(hostname string) (string, error) {
+	target, dohErr := r.lookupDoH(hostname)
+	if dohErr == nil {
+		return target, nil
+	}
+	target, sysErr := r.lookupSystem(hostname)
+	if sysErr == nil {
+		r.warn("DoH lookup failed for " + hostname + " (" + dohErr.Error() + "), used the system resolver")
+		return target, nil
+	}
+	// Report the DoH failure: it is the primary source, and its message names
+	// the actual cause (HTTP status, connection reset) instead of the generic
+	// "no such host" the fallback would produce for a name that is not public.
+	return "", dohErr
+}
+
+// lookupSystem asks the host's own resolver.
+func (r *Resolver) lookupSystem(hostname string) (string, error) {
+	resolver := r.systemLookup
+	if resolver == nil {
+		resolver = net.LookupCNAME
+	}
+	cname, err := resolver(hostname)
+	if err != nil {
+		return "", err
+	}
+	cname = strings.TrimSuffix(strings.TrimSpace(cname), ".")
+	// A name without a CNAME resolves to itself. Report that as "no CNAME" so
+	// the caller creates the route instead of believing it is already right.
+	if strings.EqualFold(cname, strings.TrimSuffix(hostname, ".")) {
+		return "", nil
+	}
+	return cname, nil
+}
+
+// lookupDoH asks Cloudflare's DoH endpoint for the CNAME of hostname. It
+// returns "" and no error when the name has no CNAME at all.
+func (r *Resolver) lookupDoH(hostname string) (string, error) {
 	endpoint := r.dohEndpoint
 	if endpoint == "" {
 		endpoint = dohURL
