@@ -141,8 +141,12 @@
             </label>
             <label class="field">
               <span>区域（region）</span>
-              <input type="text" id="set-region" placeholder="留空为自动，例如 us">
-              <small class="field-help">强制连接到指定区域的边缘节点。</small>
+              <select id="set-region">
+                <option value="">自动 · 全球（推荐）</option>
+                <option value="us">美国（us）</option>
+                <option value="fed">FedRAMP（fed）</option>
+              </select>
+              <small class="field-help">Cloudflare 目前只提供「全球」与「美国」两个区域。<code>us</code> 会让所有连接都经美国数据中心；FedRAMP 环境通常由隧道 Token 自动决定，一般无需手选。</small>
             </label>
           </div>
         </div>

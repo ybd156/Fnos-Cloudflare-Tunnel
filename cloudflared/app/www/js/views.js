@@ -213,10 +213,36 @@ export function renderSettings() {
   $('#set-edge').value = s.edgeIpVersion || '';
   $('#set-loglevel').value = s.logLevel || 'info';
   $('#set-metrics').value = s.metricsPort || 0;
-  $('#set-region').value = s.region || '';
+  applyRegion(s.region);
   $('#set-extra').value = s.extraArgs || '';
   $('#set-autostart').checked = s.autoStart !== false;
   $('#set-autorestart').checked = s.autoRestart !== false;
+}
+
+/* The region is a select because Cloudflare documents exactly two choices.
+ *
+ * A saved value outside that list must survive, though: an older config.json (or
+ * a hand-edited one) can carry a region this build does not list, and silently
+ * rewriting it to "global" would change how every tunnel connects without the
+ * user asking. Such a value gets an extra option so it stays visible and
+ * selectable instead of being dropped on the next save.
+ */
+function applyRegion(raw) {
+  const select = $('#set-region');
+  const region = String(raw || '').trim();
+  const custom = select.querySelector('option[data-custom]');
+  const known = Array.from(select.options).some((opt) => opt.value === region);
+
+  if (region && !known) {
+    const opt = custom || document.createElement('option');
+    opt.dataset.custom = '1';
+    opt.value = region;
+    opt.textContent = `自定义（${region}）`;
+    if (!custom) select.appendChild(opt);
+  } else if (custom) {
+    custom.remove();
+  }
+  select.value = region;
 }
 
 export async function saveSettings() {
