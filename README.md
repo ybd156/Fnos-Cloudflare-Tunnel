@@ -15,6 +15,7 @@
 
 其他特性：
 
+- **没有任何运行时依赖**：服务是单个静态 Go 二进制，装完即用，不需要 Node/Python/Java
 - 每个隧道一个独立 `cloudflared` 进程，互不影响
 - 异常退出后按指数退避自动重启（5 秒起，最长 60 秒，最多 10 次；稳定运行 120 秒后重置计数）
 - 实时日志查看（环形缓冲 600 行，同时落盘）
@@ -27,98 +28,126 @@
 
 ```
 fnos-cloudflared/
+├── go.mod                    # Go 模块（只用标准库，无第三方依赖）
+├── cmd/fncfd/                # 服务入口：监听、自动启动、优雅关停
+├── internal/                 # 后端包，依赖严格单向
+│   ├── paths/                #   TRIM_* → 全部路径与资源上限
+│   ├── fsx/                  #   原子写、静默删除/改权限
+│   ├── applog/               #   服务日志 + 每隧道日志 + 轮转 + 有界尾部读取
+│   ├── config/               #   config.json：类型、规范化、校验、合并读写
+│   ├── cf/                   #   调用 cloudflared：exec、argv/config.yml、账户、自更新
+│   ├── dnsroute/             #   本地管理隧道的 CNAME 路由检查与修复
+│   ├── runner/               #   每隧道一个子进程的监督与退避重启
+│   └── web/                  #   静态资源 + REST API
 ├── cloudflared/              # fnpack 工程目录（目录名必须等于 appname）
-│   ├── manifest              # 应用元信息
-│   ├── ICON.PNG              # 64×64 图标
-│   ├── ICON_256.PNG          # 256×256 图标
+│   ├── manifest              # 应用元信息（无 install_dep_apps）
+│   ├── ICON.PNG / ICON_256.PNG
 │   ├── app/                  # 应用载荷，安装后落到 /var/apps/cloudflared/target/
 │   │   ├── bin/cloudflared   # 官方 cloudflared 二进制（不随仓库分发，见下）
-│   │   ├── server/server.js  # Node 后端入口（零 npm 依赖，仅用内置模块）
-│   │   ├── server/lib/       # 后端模块：paths/log/store/dns/cloudflared/runner/http
-│   │   ├── www/              # 前端（原生 JS 单页，中文界面）
+│   │   ├── bin/fncfd         # 本服务二进制（构建产物）
+│   │   ├── www/              # 前端：index.html + js/ 六个 ES 模块 + style.css
 │   │   └── ui/config         # 应用入口与图标配置
 │   ├── cmd/                  # 生命周期脚本（含共用库 _lib）
 │   ├── config/               # privilege + resource
 │   └── wizard/               # 安装 / 升级 / 卸载 / 设置向导
-├── tools/make-icons.py       # 纯标准库图标生成器（无需 Pillow）
-├── tools/fetch-cloudflared.py # 下载固定版本的 cloudflared 二进制并校验 SHA-256
-├── tools/test-backend.mjs    # 后端回归测试（便携段 + 真机段，单一入口）
-├── tools/test-lifecycle.sh   # 模拟安装：真实跑一遍生命周期脚本
-├── tools/test-ui.mjs         # 前端回归测试（最小 DOM 桩）
-├── tools/lint-requires.mjs   # 静态检查：模块用了却没用 require 引入的命名空间
-├── tools/lint-ui.mjs         # 静态检查：UI 选择器 / 类名是否真的能解析到元素与样式
-├── tools/lint-shell.mjs      # 静态检查：生命周期脚本（set -u、裸调 node、引号配平）
-├── tools/normalize-fpk.py    # 打包后归一化归档内的权限位（并修正 checksum）
-├── tools/verify-fpk.py       # 打包后校验产物与源码是否一致
-├── tools/validate-json.py    # JSON 配置校验
-├── build.sh                  # 构建脚本（Linux / NAS）
-├── build.ps1                 # 构建脚本（Windows，等价于 build.sh）
+├── tools/                    # 构建与校验工具，全部 Go
+│   ├── build/                #   唯一的构建流水线（build.sh/ps1 都转调它）
+│   ├── fetchcf/              #   下载固定版本 cloudflared 并校验 SHA-256
+│   ├── icons/                #   纯标准库图标生成器
+│   ├── fpk/                  #   归档权限归一化 + 产物校验
+│   ├── validatejson/         #   JSON 配置校验
+│   ├── lintui/               #   UI 选择器契约检查
+│   ├── lintshell/            #   生命周期脚本静态检查
+│   └── test-lifecycle.sh     #   模拟安装：真实跑一遍生命周期脚本（需 Linux）
+├── docs/
+│   ├── ARCHITECTURE.md       # 包边界、导出接口契约、工程规则
+│   └── DESIGN.md             # 运行形态、关键不变量、历代缺陷记录
+├── build.sh                  # 薄封装：定位 go 后转调 tools/build
+├── build.ps1                 # 同上（Windows）
 └── dist/cloudflared.fpk      # 构建产物（本地产物，不随仓库分发）
 ```
 
+## 从 1.4.1 升级
+
+1.4.2 把后端从 Node 服务换成了 Go 静态二进制：
+
+- manifest 不再声明 `install_dep_apps`，**不再需要 `nodejs_v24`**（这个依赖名本来也不在
+  官方依赖文档里，只有 `nodejs_v22`）。升级后可以卸载它。
+- `config.json` 的字段名、默认值与合并语义完全沿用，**隧道不需要重新配置**。
+- 账户凭据 `cert.pem` 与各隧道凭据原地保留。
+
 ## 构建
 
-需要官方 `fnpack` 工具（本项目已在 `/usr/local/bin/fnpack`，版本 1.2.4）。
-官方下载地址：<https://static2.fnnas.com/fnpack/>。
-
-> **关于 `app/bin/cloudflared`。** 这个 38MB 的二进制**不在仓库里**（见 `.gitignore`）：
-> 它是 Cloudflare 官方发布的构建产物，本仓库没有任何人修改它，提交进 Git 只会让每次
-> 克隆都拖下 38MB，并让它永久留在提交历史中。取而代之的是
-> `tools/fetch-cloudflared.py`：它按固定版本下载官方 release，**校验 SHA-256 后**才落盘。
-> 打包好的 `.fpk`（其中当然包含该二进制）作为 GitHub Release 附件发布。
-> 构建脚本会自动调用它，所以从干净克隆到打包不需要手工准备。
+需要 Go ≥ 1.22；打包还需要官方 `fnpack`（本项目已在 `/usr/local/bin/fnpack`，
+版本 1.2.4，下载地址 <https://static2.fnnas.com/fnpack/>）。**不再需要 Node 或 Python。**
 
 ```bash
-./build.sh              # 重新生成图标 → 校验 → 打包
+./build.sh              # 重新生成图标 → 校验 → 交叉编译 → 打包
 ./build.sh --no-icons   # 跳过图标生成
+./build.sh --no-pack    # 只跑全部校验，不打 .fpk（没有 fnpack 的机器用这个）
 ```
 
-在 **Windows** 上（无 bash、无 fnpack on PATH）用等价的 PowerShell 脚本：
+Windows 上用等价封装：
 
 ```powershell
 pwsh -File build.ps1
-pwsh -File build.ps1 -NoIcons -Fnpack C:\tools\fnpack-1.2.3.exe
+pwsh -File build.ps1 -NoIcons -Fnpack C:\tools\fnpack-1.2.4.exe
 ```
 
-脚本会依次完成：
+两个脚本都只是**薄封装**：解析自己的参数、定位 `go` 与 `fnpack`，然后转调
+`go run ./tools/build`。流水线只存在一份，不会像 1.4.1 那样两份脚本各自漂移。
 
-1. 用 `tools/fetch-cloudflared.py` 确保存在固定版本的 `cloudflared` 二进制并校验其 SHA-256
-2. 用 `tools/make-icons.py` 生成 6 个尺寸的图标
-3. 归一化权限位（本机文件系统会把新建文件呈现为 `0000`，而 `.fpk` 也不保证保留权限位）
-4. `bash -n` 校验全部生命周期脚本
-5. 用 `tools/lint-requires.mjs` 检查后端有没有「用了却没 require」的模块命名空间
-6. 用 `tools/lint-ui.mjs` 检查前端选择器与类名是否真的解析得到元素和样式
-7. 用 `tools/lint-shell.mjs` 静态检查生命周期脚本（见下）
-8. 校验全部 JSON 配置
-9. 检查必需文件是否齐全
-10. 调用 `fnpack build` 产出 `dist/cloudflared.fpk`
-11. 用 `tools/normalize-fpk.py` 修正**归档内**的权限位（见下）
-12. 用 `tools/verify-fpk.py` 复核产物与源码一致，然后打印大小与 SHA-256
+流水线依次完成：
 
-> **为什么需要第 7、8 步。** `fnpack` 的权限位取自宿主文件系统的 `stat()`。Linux 上
-> 第 2 步的 `chmod` 已经生效，所以归档里是 `0755`/`0644`；但 Windows 没有可执行位，
-> 于是每个文件都变成 `0666`、目录变成 `0777` —— `cmd/main` 和 `app/bin/cloudflared`
-> 到了 NAS 上是**不可执行**的，应用根本起不来。`normalize-fpk.py` 把两层 tar 的权限位
-> 改写回 Linux 的正确值，并同步修正 manifest 里的 `checksum`（它是新 `app.tgz` 的 MD5）。
->
-> 另外，`fnpack build` 只要必需文件存在就打印 "Packing successfully"，**不会**检查归档
-> 内容是否等于当前源码树。所以从旧源码树打包、或漏掉权限修正，都会"成功"。`verify-fpk.py`
-> 因此重新打开产物逐项断言：容器结构、manifest 与源码逐字节相同且版本一致、checksum 自洽、
-> **遍历源码树自动发现的每个文件都与源码逐字节相同**（不再是一份手工维护的清单 —— 那种
-> 写法会漏掉 fnOS 真正执行与渲染的 `cmd/*` 生命周期脚本和 `wizard/*` 描述文件）、
-> 权限位、以及 1.3.1 / 1.4.0 / 1.4.1 各缺陷的回归探针。
->
-> 那个不在仓库里的二进制也不会被放过：`verify-fpk.py` 会读
-> `tools/fetch-cloudflared.py` 里的版本与 SHA-256 固定值，断言**包内二进制**的哈希与之相符、
-> 且该版本号确实出现在二进制里。这样即便上游用同一版本号重新发布了不同的构建，也会被拦下。
->
-> 拿它去查本仓库里那份陈旧的 1.3.0 产物可以确认这道门禁确实会拦人（会报 39 项失败）；
-> 一个从不失败的检查等于没有检查。
+1. 用 `tools/fetchcf` 确保存在固定版本的 `cloudflared` 二进制并校验 SHA-256
+2. 用 `tools/icons` 生成 6 个尺寸的图标
+3. **交叉编译服务二进制**：`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath
+   -ldflags="-s -w" -o cloudflared/app/bin/fncfd ./cmd/fncfd`（约 7.8MB 静态二进制）
+4. 归一化权限位
+5. `bash -n` 校验全部生命周期脚本
+6. `go vet` + `go test` 静态检查
+7. `tools/lintui` 检查前端选择器契约（扫描 `www` 下全部 `.js`）
+8. `tools/lintshell` 静态检查生命周期脚本
+9. `tools/validatejson` 校验全部 JSON 配置
+10. 检查必需文件是否齐全
+11. 调用 `fnpack build` 产出 `dist/cloudflared.fpk`
+12. `tools/fpk` 修正**归档内**的权限位并复核产物与源码一致，打印大小与 SHA-256
+
+> **关于 `app/bin/cloudflared`。** 这个 38MB 的二进制**不在仓库里**（见 `.gitignore`）：
+> 它是 Cloudflare 官方发布的构建产物，本仓库没有任何人修改它，提交进 Git 只会让每次
+> 克隆都拖下 38MB，并让它永久留在提交历史中。取而代之的是 `tools/fetchcf`：它按固定
+> 版本下载官方 release，**校验 SHA-256 后**才落盘。`app/bin/fncfd` 同理是构建产物。
+> 打包好的 `.fpk`（其中当然包含这两个二进制）作为 GitHub Release 附件发布。
+
+> **为什么需要归档权限归一化。** `fnpack` 的权限位取自宿主文件系统的 `stat()`。Linux 上
+> 第 4 步的 `chmod` 已经生效；但 Windows 没有可执行位，于是每个文件都变成 `0666`、
+> 目录变成 `0777` —— `cmd/main` 和两个二进制到了 NAS 上是**不可执行**的，应用根本起不来。
+> `tools/fpk` 把两层 tar 的权限位改写回 Linux 的正确值，并同步修正 manifest 里的
+> `checksum`（它是新 `app.tgz` 的 MD5）。
+
+> **为什么还要复核产物。** `fnpack build` 只要必需文件存在就打印 "Packing successfully"，
+> **不会**检查归档内容是否等于当前源码树。所以从旧源码树打包、或漏掉权限修正，都会"成功"。
+> `tools/fpk` 因此重新打开产物逐项断言：容器结构、manifest 与源码逐字节相同且版本一致、
+> checksum 自洽、**遍历源码树自动发现的每个文件都与源码逐字节相同**、权限位、以及
+> 1.3.1 / 1.4.0 / 1.4.1 各缺陷的回归探针。包内 `cloudflared` 二进制的哈希也会与固定值比对。
 
 > 构建**不是**字节级可复现的：`.fpk` 内 `app.tgz` 的 md5 会被写入 manifest 的
 > `checksum` 字段，而 tar 时间戳每次构建都会变化。
 
 ## 测试
+
+```bash
+go test ./...           # 全部单元测试（纯逻辑，任何平台可跑）
+go vet ./...            # 静态检查
+go run ./tools/lintui   # 前端选择器契约
+go run ./tools/lintshell# 生命周期脚本静态契约
+```
+
+竞态检测需要 cgo，Windows 上还要有 gcc，建议在 Linux 上跑：
+
+```bash
+CGO_ENABLED=1 go test -race ./...
+```
 
 安装 `.fpk` 需要 root，因此项目自带一个**模拟安装**测试，在临时目录里复现应用中心
 创建 `/var/apps/cloudflared/` 的布局，并用应用中心会导出的 `TRIM_*` 环境变量真实地
@@ -136,74 +165,30 @@ setsid ./tools/test-lifecycle.sh
 
 用 `setsid` 运行是为了把测试放进独立会话，避免脚本里的进程组信号影响到外层 shell。
 
-### 后端回归测试
+### 后端测试覆盖了什么
 
-```bash
-node ./tools/test-backend.mjs
-```
+`go test ./...` 覆盖的都是**曾经真实让功能失效**的缺陷：
 
-单一入口、两段覆盖，避免重复：
+- 数据目录确实被创建；配置写入后能原样读回（`Store.Load` 曾把整份文档反序列化进
+  `Settings`，导致每次重启后全局设置静默回到默认值）
+- 配置双写者语义：外部 `config_callback` 写入的设置不会被隧道编辑回滚，本进程的写入优先
+- 隧道 id 的路径安全：含 `..`、路径分隔符或非法字符的 id 一律换成新 id
+- Token 三条规则（空串=不修改、`null`=清空、缺省=保留）与「响应里不出现完整 Token」
+- 凭据解析绝不猜：只存了名称的隧道返回空，而不是挑一个 `<uuid>.json` 顶替
+- `config.yml` 生成与 argv 顺序（`--output` 必须在 `list`/`create` 之后）
+- 请求体上限返回 413、非 JSON 返回 400、畸形百分号编码返回 4xx 且进程存活
+- 静态目录穿越与 `www-evil` 这类同前缀兄弟目录
+- 未知隧道 id 的每条 `:id` 路由都返回 404，且不会在监督器里留下记录
+- 日志尾部读取不返回窗口边界残行、不返回未初始化字节
 
-**便携段（任何开发机）** 在进程内加载真实的 `app/server/lib/http.js` 请求处理器，通过
-loopback HTTP 驱动整套 API，**不需要 bash、`ps` 或符号链接**。100 项断言锁住了这些曾经让
-「基本功能」直接失效的缺陷：
+### 前端测试的取舍
 
-- 数据目录确实被创建（`ensureDirs` 曾经因为漏 `require('fs')` 而是空操作，导致首次
-  安装后保存隧道、写 `config.yml`、登录账户、写日志全部失败）
-- 「修复 DNS 路由」不再抛 `ReferenceError`（`lib/dns.js` 漏 `require('path')`）
-- `DELETE /api/tunnels/:id` 返回 200 而不是 500，并且运行时记录与重启定时器被清理
-- 只填名称、没有隧道 ID 的本地管理隧道**不会**去拿别的 `<uuid>.json` 顶替，而是明确报错
-- cloudflared 子命令参数顺序正确（`--output` 跟在 `list`/`create` 之后）
-- 目录穿越读不到 `www` 之外的兄弟目录
-- 畸形百分号编码（`GET /%`、账户接口路径）返回 4xx 而不是 500
-- 日志尾部读取**不会吐出未初始化内存**（`readTailLines` 曾忽略 `readSync` 的返回值；
-  日志轮转把文件改名后，缓冲区里的堆垃圾会被当成日志内容送到界面）
-
-**真机段（需 Linux）** 把真实的 `app/server/server.js` 连同 `lib/` 跑在一个临时
-`TRIM_APPDEST`/`TRIM_PKGVAR` 里，用桩 `cloudflared`（会记录每次调用，并模拟真实
-进程那样优雅退出 2 秒）演练整条 HTTP 接口链路。需要 Linux 环境（用到 bash、`ps`
-与符号链接）；在 Windows 上会**打印提示并跳过**，而不是让整个文件跑不了。覆盖内容：
-全局设置真正出现在 cloudflared 命令行（含曾经被忽略的「附加参数」）→ 本地管理隧道的
-入站校验（域名格式、服务协议）→ 启停、`config.yml` 生成与 DNS 路由 → **保存正在运行的
-隧道时的重启竞态**（状态不被旧进程覆盖、同一隧道始终只有一个 cloudflared）→ 未运行时
-保存同样即时生效 → 重启按钮与关闭自动 DNS → **关停不留孤儿进程**（含 cloudflared 慢退出
-场景）→ 账户登录/退出流程。每个小节结束时都会断言没有遗留的 cloudflared 进程。
-
-前端另有一个回归测试，用最小 DOM 桩把 `app/www/app.js` 加载进 Node 并演练隧道列表渲染
-与隧道弹窗：
-
-```bash
-node ./tools/test-ui.mjs
-```
-
-它锁住两类问题。**正确性**：账户页的「新建隧道配置」按钮原本把**预填对象**当成
-「正在编辑的隧道」传给了 `openTunnelModal`，于是保存时发出
-`PUT /api/tunnels/undefined`，界面报「隧道不存在」；测试断言该按钮进入的是**新建**模式、
-保存走 `POST /api/tunnels`，并断言下拉框会把云端隧道的 UUID 一并提交（`tunnelId`），
-好让 `cloudflared` 用 `<UUID>.json` 精确定位凭据文件。**性能与可用性**：轮询渲染必须是
-「内容不变就不碰 DOM」（否则每 3 秒重建一次列表，展开的日志框会被反复拉回顶部）、
-日志正文不得内联进卡片 HTML（运行中的隧道每秒都在输出，内联进去等于每次轮询都重建列表）、
-日志框只在读者本来就在底部时才跟随最新行、以及状态筛选的分类计数归零后要自动退回
-「全部」（否则列表整片空白且无法退出）。
-
-UI 的选择器契约由 `tools/lint-ui.mjs` 静态把守：它检查 `app.js` 查询的每个 `#id` 都能在
-`index.html` 或 `app.js` 自己生成的标记里找到、每个用到的类名在 `style.css` 里有规则、
-以及 `index.html` 里的 id 不重复。这类错误**不会报错**——处理器绑到 `null` 上，按钮就是
-没反应，控制台一片安静，所以值得在构建时就拦住。
-
-生命周期脚本的静态契约由 `tools/lint-shell.mjs` 把守。它存在的原因是：这些脚本跑在 NAS
-上，而开发机（尤其 Windows）**根本没有 bash 可以执行它们**——本仓库自带的 minGit 里虽然有
-`sh.exe`，但它在沙箱下起不来（需要信号管道）。于是脚本改动长期只能靠肉眼审查，而这类改动
-真正的错误恰好都是肉眼看不出来的：
-
-- `set -u` 下裸用 `${TRIM_X}`：在作者机器上恰好导出过该变量所以正常，到了应用中心的环境
-  里直接中止；
-- 裸调 `node`：开发机有，NAS 上没有（依赖应用不进 PATH，这正是 `cmd/_lib` 探测绝对路径的
-  原因）——这是最糟的失败形态，本地全绿、目标环境全挂；
-- 引号不配平：会静默吞掉文件后半部分。
-
-它是文本检查，**不能替代在 NAS 上真跑一遍** `tools/test-lifecycle.sh`，但能拦住上面这类
-审查必然漏掉的问题。该工具本身也用「故意改坏 → 确认变红」验证过三类违例都会被抓住。
+1.4.1 有一个基于 Node + 最小 DOM 桩的 UI 行为套件（42 项断言）。去掉 Node 之后，在没有
+JS 引擎的 Go 测试里无法执行浏览器代码，因此该套件**没有等价迁移**：现在前端由
+`tools/lintui` 做静态契约检查 —— `app.js`（现在是 `www/js/*.js`）查询的每个 `#id` 都能
+解析到元素、每个用到的类名在 `style.css` 里有规则、`index.html` 的 id 不重复、模块
+`import` 的目标都存在。这类错误**不会报错**（处理器绑到 `null`，按钮就是没反应），
+所以值得在构建时拦住。
 
 ## 安装
 
@@ -213,7 +198,7 @@ UI 的选择器契约由 `tools/lint-ui.mjs` 静态把守：它检查 `app.js` �
    下载最新版 `cloudflared-<版本>.fpk`（`dist/` 只是本地构建目录，不在仓库中）
 2. 打开「应用中心」→ 右上角「手动安装」→ 选择该 `.fpk`
 3. 安装向导中确认是否「服务启动时自动运行已启用的隧道」
-4. 安装会自动安装依赖应用 `nodejs_v24`
+4. 安装过程**不会**再安装任何依赖应用
 
 也可以在 NAS 的 root shell 中执行：
 
@@ -267,8 +252,8 @@ appcenter-cli install-fpk /path/to/cloudflared.fpk
 | `$PKGVAR/config.json` | 隧道定义、设置、Token | `0600` |
 | `$PKGVAR/.cloudflared/cert.pem` | Cloudflare 账户凭据 | 目录 `0700` |
 | `$PKGVAR/tunnels/<id>/config.yml` | 每个本地管理隧道的配置 | `0750` |
-| `$PKGVAR/logs/<id>.log` | 每个隧道的 cloudflared 日志 | — |
-| `$PKGVAR/server.log` | 应用自身日志（自动轮转） | — |
+| `$PKGVAR/logs/<id>.log` | 每个隧道的 cloudflared 日志 | `0640` |
+| `$PKGVAR/server.log` | 应用自身日志（自动轮转） | `0640` |
 | `$PKGVAR/main.log` | 生命周期脚本日志 | — |
 
 其中 `$PKGVAR` 即 `/vol1/@appdata/cloudflared`。
@@ -288,9 +273,13 @@ appcenter-cli install-fpk /path/to/cloudflared.fpk
 
 ## 常见问题
 
-**Q：启动失败，提示找不到 Node.js？**
-A：应用依赖 `nodejs_v24`。请在应用中心确认该依赖已安装；生命周期脚本会在
-`/var/apps/nodejs_v24/target/bin`、`/var/apps/nodejs_v22/target/bin` 等位置自动查找。
+**Q：升级到 1.4.2 后还需要 nodejs_v24 吗？**
+A：不需要。服务已经是静态二进制，manifest 不再声明任何依赖应用，可以把它卸载。
+旧版本会去 `/var/apps/nodejs_v2*/target/bin/node` 探测解释器，现在这一步已经删除。
+
+**Q：启动失败，提示「应用文件缺失或不可执行」？**
+A：说明载荷里的 `bin/fncfd` 或 `bin/cloudflared` 没到位或没有可执行位。重新安装；
+若自行打包，确认走了 `./build.sh`（它会交叉编译二进制并归一化归档权限位）。
 
 **Q：隧道一直处于「启动中」？**
 A：打开该隧道的日志查看 cloudflared 输出。若 UDP 7844 被网络阻断，请在
@@ -315,11 +304,15 @@ A：`cmd/main status` 返回 `0` = 运行中，`3` = 未运行，`1` = 失败。
 
 ## 技术说明
 
-- 后端：Node.js 内置模块（`http` / `fs` / `path` / `crypto` / `child_process` / `https`），
-  **零 npm 依赖**，因此安装时无需联网下载任何包
-- 前端：原生 JavaScript 单页应用，无构建步骤
+- 后端：Go，**只用标准库**（`net/http` / `os` / `os/exec` / `encoding/json` /
+  `archive/tar` 等），没有任何第三方模块，因此安装与构建都不需要联网拉包
+- 服务是**单个静态二进制**（`CGO_ENABLED=0`，linux/amd64，strip 后约 7.8MB）
+- 前端：原生 JavaScript，拆成 6 个 ES 模块（`www/js/`），无框架、无构建步骤
 - 网关前缀由后端在返回 HTML 时把 `%%CF_BASE%%` 占位符替换为实际前缀，
   因此同一套代码在「网关访问」与「本地直连」两种入口下都能正确解析资源路径
 - 生命周期脚本参考 `fn-deepseek-harness` 的健壮性写法：用 `/proc/<pid>/stat`
   识别僵尸进程、用 `/proc/<pid>/cmdline` 校验进程身份以避免误杀 PID 复用进程
+- 构建工具同样是 Go，`build.sh` 与 `build.ps1` 只做薄封装
 
+更细的设计与缺陷史见 [`docs/DESIGN.md`](docs/DESIGN.md)，
+包边界与接口契约见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。

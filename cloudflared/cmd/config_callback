@@ -9,53 +9,17 @@ set -u
 . "$(dirname "$0")/_lib"
 
 CONFIG_FILE="${PKGVAR}/config.json"
+SERVER_BIN="${APPDEST}/bin/fncfd"
 
-NODE="$(find_node)" || fail "未找到 Node.js 运行时，无法保存设置。"
+[ -x "${SERVER_BIN}" ] || fail "应用文件缺失或不可执行：${SERVER_BIN}，请尝试重新安装应用。"
 mkdir -p "${PKGVAR}" || fail "无法创建数据目录 ${PKGVAR}。"
 
-CF_CONFIG_FILE="${CONFIG_FILE}" \
-    CF_AUTO_START="${wizard_auto_start:-}" \
-    CF_AUTO_RESTART="${wizard_auto_restart:-}" \
-    CF_LOG_LEVEL="${wizard_log_level:-}" \
-    CF_PROTOCOL="${wizard_protocol:-}" \
-    "${NODE}" -e '
-const fs = require("fs");
-const file = process.env.CF_CONFIG_FILE;
-
-let cfg = {};
-try {
-    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) cfg = parsed;
-} catch (e) {
-    cfg = {};
-}
-if (!cfg.settings || typeof cfg.settings !== "object" || Array.isArray(cfg.settings)) {
-    cfg.settings = {};
-}
-
-const asBool = (value) => {
-    const text = String(value || "").trim().toLowerCase();
-    if (text === "true" || text === "1" || text === "yes" || text === "on") return true;
-    if (text === "false" || text === "0" || text === "no" || text === "off") return false;
-    return null;
-};
-const setBool = (envName, key) => {
-    const value = asBool(process.env[envName]);
-    if (value !== null) cfg.settings[key] = value;
-};
-const setEnum = (envName, key, allowed) => {
-    const value = String(process.env[envName] || "").trim();
-    if (value && allowed.indexOf(value) >= 0) cfg.settings[key] = value;
-};
-
-setBool("CF_AUTO_START", "autoStart");
-setBool("CF_AUTO_RESTART", "autoRestart");
-setEnum("CF_LOG_LEVEL", "logLevel", ["debug", "info", "warn", "error"]);
-setEnum("CF_PROTOCOL", "protocol", ["auto", "quic", "http2"]);
-
-fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
-try { fs.chmodSync(file, 0o600); } catch (e) {}
-' || fail "写入配置文件 ${CONFIG_FILE} 失败。"
+# The merge is performed by the service binary itself. It owns the config
+# format, and this script used to need a Node runtime purely to edit JSON --
+# which is exactly the dependency the package no longer has. `config-set` reads
+# the same wizard_* variables from the environment and rewrites only the
+# settings half of the file.
+"${SERVER_BIN}" config-set || fail "写入配置文件 ${CONFIG_FILE} 失败。"
 
 log_info "Settings saved to ${CONFIG_FILE}."
 exit 0

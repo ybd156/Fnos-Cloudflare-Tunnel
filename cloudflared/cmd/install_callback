@@ -8,7 +8,7 @@ set -u
 . "$(dirname "$0")/_lib"
 
 CF_BIN="${APPDEST}/bin/cloudflared"
-SERVER_JS="${APPDEST}/server/server.js"
+SERVER_BIN="${APPDEST}/bin/fncfd"
 VERSION_FILE="${PKGVAR}/VERSION"
 
 # ------------------------------------------------------------------- data dirs
@@ -23,15 +23,17 @@ chmod 750 "${PKGVAR}/tunnels" "${PKGVAR}/logs" 2>/dev/null || true
 [ -f "${CF_BIN}" ] || fail "应用文件缺失：${CF_BIN}"
 chmod 755 "${CF_BIN}" || fail "无法为 cloudflared 二进制设置可执行权限。"
 chmod 755 "${APPDEST}/bin" 2>/dev/null || true
-chmod 644 "${SERVER_JS}" 2>/dev/null || true
-chmod 755 "${APPDEST}/www" 2>/dev/null || true
-chmod 644 "${APPDEST}/www"/*.html "${APPDEST}/www"/*.css "${APPDEST}/www"/*.js 2>/dev/null || true
 
-# The backend is a small module tree; a module left at mode 0000 by the archive
-# would make require() fail at startup, so normalise the whole directory.
-if [ -d "${APPDEST}/server" ]; then
-    find "${APPDEST}/server" -type d -exec chmod 755 {} + 2>/dev/null || true
-    find "${APPDEST}/server" -type f -exec chmod 644 {} + 2>/dev/null || true
+# The service is a static binary now; without the executable bit the app centre
+# can never start it, and the failure surfaces only as a dead UI.
+[ -f "${SERVER_BIN}" ] || fail "应用文件缺失：${SERVER_BIN}"
+chmod 755 "${SERVER_BIN}" || fail "无法为服务二进制设置可执行权限。"
+
+# The UI is plain files under www/, including the ES module directory. A file
+# left at mode 0000 by the archive makes the page load nothing at all.
+if [ -d "${APPDEST}/www" ]; then
+    find "${APPDEST}/www" -type d -exec chmod 755 {} + 2>/dev/null || true
+    find "${APPDEST}/www" -type f -exec chmod 644 {} + 2>/dev/null || true
 fi
 
 # ------------------------------------------------------------ binary sanity
@@ -40,6 +42,12 @@ if [ -z "${CF_VERSION}" ]; then
     fail "cloudflared 二进制无法执行，安装包可能已损坏。"
 fi
 log_info "Bundled ${CF_VERSION}."
+
+SERVER_VERSION="$("${SERVER_BIN}" --version 2>/dev/null | head -n 1 || true)"
+if [ -z "${SERVER_VERSION}" ]; then
+    fail "服务二进制无法执行，安装包可能已损坏。"
+fi
+log_info "Service ${SERVER_VERSION}."
 
 printf '%s\n' "${TRIM_APPVER:-unknown}" >"${VERSION_FILE}"
 chmod 644 "${VERSION_FILE}" 2>/dev/null || true

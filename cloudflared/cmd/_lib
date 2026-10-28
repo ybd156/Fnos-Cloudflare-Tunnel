@@ -6,8 +6,12 @@
 #     . "$(dirname "$0")/_lib"
 #
 # It provides the TRIM_*-derived locations, the logging helpers every script
-# needs, the `fail` that surfaces a message through the App Center, and the
-# Node.js runtime probe. Everything here must stay safe under `set -u`.
+# needs, and the `fail` that surfaces a message through the App Center.
+# Everything here must stay safe under `set -u`.
+#
+# There is deliberately no runtime probe here any more: the service is a single
+# static binary shipped in the payload (app/bin/fncfd), so the app declares no
+# dependency apps and nothing has to be located in PATH.
 
 APPNAME="${TRIM_APPNAME:-cloudflared}"
 APPDEST="${TRIM_APPDEST:-/var/apps/${APPNAME}/target}"
@@ -37,30 +41,4 @@ fail() {
         printf '%s\n' "${message}" >"${TRIM_TEMP_LOGFILE}" 2>/dev/null || true
     fi
     exit 1
-}
-
-# Dependency applications are NOT added to PATH automatically, so probe the
-# well-known install locations of the nodejs_* runtime apps.
-find_node() {
-    local candidates candidate
-    candidates="${TRIM_NODE_BIN:-}"
-    candidates="${candidates} /var/apps/nodejs_v24/target/bin/node"
-    candidates="${candidates} /var/apps/nodejs_v22/target/bin/node"
-    candidates="${candidates} /var/apps/nodejs_v20/target/bin/node"
-    if [ -n "${TRIM_APPDEST_VOL:-}" ]; then
-        candidates="${candidates} ${TRIM_APPDEST_VOL}/@appcenter/nodejs_v24/bin/node"
-        candidates="${candidates} ${TRIM_APPDEST_VOL}/@appcenter/nodejs_v22/bin/node"
-    fi
-    candidates="${candidates} /usr/local/bin/node /usr/bin/node"
-    for candidate in ${candidates}; do
-        if [ -x "${candidate}" ]; then
-            printf '%s' "${candidate}"
-            return 0
-        fi
-    done
-    if command -v node >/dev/null 2>&1; then
-        command -v node
-        return 0
-    fi
-    return 1
 }

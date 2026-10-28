@@ -6,7 +6,7 @@ set -u
 
 PID_FILE="${PKGVAR}/server.pid"
 LOG_FILE="${PKGVAR}/main.log"
-SERVER_JS="${APPDEST}/server/server.js"
+SERVER_BIN="${APPDEST}/bin/fncfd"
 CF_BIN="${APPDEST}/bin/cloudflared"
 SOCKET_PATH="${APPDEST}/app.sock"
 GATEWAY_PREFIX="/app/${APPNAME}"
@@ -50,7 +50,7 @@ is_our_server() {
     local command_line
     command_line="$(process_command_line "${pid}")" || return 1
     case "${command_line}" in
-    *"${SERVER_JS}"*) return 0 ;;
+    *"${SERVER_BIN}"*) return 0 ;;
     esac
     return 1
 }
@@ -139,20 +139,15 @@ start_process() {
         return 0
     fi
 
-    local node
-    if ! node=$(find_node); then
-        fail "未找到 Node.js 运行时，请确认依赖应用 nodejs_v24 已正确安装。"
-    fi
-
-    if [ ! -r "${SERVER_JS}" ]; then
-        fail "应用文件缺失：${SERVER_JS}，请尝试重新安装应用。"
+    if [ ! -x "${SERVER_BIN}" ]; then
+        fail "应用文件缺失或不可执行：${SERVER_BIN}，请尝试重新安装应用。"
     fi
 
     mkdir -p "${PKGVAR}" || fail "无法创建数据目录 ${PKGVAR}。"
     rm -f "${PID_FILE}"
     rm -f "${SOCKET_PATH}"
 
-    log_info "Starting ${APPNAME} service with ${node}."
+    log_info "Starting ${APPNAME} service with ${SERVER_BIN}."
 
     (
         cd "${APPDEST}" || exit 1
@@ -163,7 +158,7 @@ start_process() {
         export TRIM_PKGETC="${PKGETC}"
         export TRIM_SERVICE_PORT="${TRIM_SERVICE_PORT:-0}"
         export GATEWAY_PREFIX="${GATEWAY_PREFIX}"
-        exec nohup "${node}" "${SERVER_JS}" >>"${LOG_FILE}" 2>&1
+        exec nohup "${SERVER_BIN}" >>"${LOG_FILE}" 2>&1
     ) &
     local new_pid=$!
     printf '%s\n' "${new_pid}" >"${PID_FILE}"

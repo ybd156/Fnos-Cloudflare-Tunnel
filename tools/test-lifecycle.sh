@@ -8,6 +8,15 @@
 # It exercises the whole install -> start -> status -> config -> uninstall path
 # for real, rather than only syntax-checking the scripts.
 #
+# The service is a static Go binary (target/bin/fncfd). The suite compiles it
+# from ./cmd/fncfd so it always tests the current source, and it replaces the
+# 38MB upstream cloudflared with a stub -- the lifecycle scripts only need it to
+# exist, be executable, answer --version, and stay alive so the token-delivery
+# assertions can inspect its argv and environment.
+#
+# This suite drives /proc, ps and Unix sockets, so it only runs on Linux (the
+# NAS). Everywhere else it prints SKIP and exits 0.
+#
 # Run it under setsid so that any process-group signal stays inside the test:
 #
 #   setsid ./tools/test-lifecycle.sh
@@ -35,6 +44,11 @@ check() { # check <description> <expected> <actual>
 }
 section() { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
 
+if [ "$(uname -s)" != "Linux" ]; then
+    printf '\n\033[33mSKIP\033[0m this suite needs Linux (/proc, ps, unix sockets); it runs on the NAS.\n'
+    exit 0
+fi
+
 # ------------------------------------------------------------------ environment
 # Mirror what the app centre exports before invoking cmd/*.
 export TRIM_APPNAME=cloudflared
@@ -46,16 +60,65 @@ export TRIM_PKGHOME="$SCRATCH/home"
 export TRIM_APPDEST_VOL="$SCRATCH"
 export TRIM_TEMP_LOGFILE="$SCRATCH/install.log"
 export TRIM_SERVICE_PORT=0
+export TRIM_APPVER=1.4.2
 
 setup_install_root() {
     rm -rf "$SCRATCH"
     mkdir -p "$APPS" "$TRIM_PKGVAR" "$TRIM_PKGTMP" "$TRIM_PKGETC" "$TRIM_PKGHOME"
-    cp -a "$SRC/app" "$APPS/target"
+    mkdir -p "$APPS/target/bin"
+    cp -a "$SRC/app/." "$APPS/target/"
     cp -a "$SRC/cmd" "$APPS/cmd"
     cp -a "$SRC/config" "$APPS/config"
     cp -a "$SRC/wizard" "$APPS/wizard"
     cp "$SRC/manifest" "$APPS/manifest"
     : >"$TRIM_TEMP_LOGFILE"
+}
+
+# The stub stands in for the upstream binary. It must answer --version (the
+# install callback checks it) and stay alive for a tunnel start, so the token
+# delivery assertions have a process to inspect.
+make_cloudflared_stub() {
+    cat >"$APPS/target/bin/cloudflared" <<'STUB'
+#!/bin/bash
+# Test stub for the upstream cloudflared binary.
+for arg in "$@"; do
+    case "$arg" in
+    --version | version)
+        echo "cloudflared version 2026.9.3 (stub)"
+        exit 0
+        ;;
+    list)
+        echo "[]"
+        exit 0
+        ;;
+    esac
+done
+trap 'kill "$child" 2>/dev/null; exit 0' TERM INT
+sleep 60 &
+child=$!
+wait "$child"
+STUB
+    chmod 755 "$APPS/target/bin/cloudflared"
+}
+
+# The service is the Go binary. Compile it from source so the suite always
+# tests the working tree; fall back to the binary the build pipeline produced
+# when this host has no Go toolchain (the NAS installs a static binary, so it
+# has no reason to).
+build_server_binary() {
+    local out="$APPS/target/bin/fncfd"
+    if command -v go >/dev/null 2>&1; then
+        if ! (cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$out" ./cmd/fncfd); then
+            echo "FATAL: go build ./cmd/fncfd failed" >&2
+            exit 1
+        fi
+    elif [ -x "$SRC/app/bin/fncfd" ]; then
+        cp "$SRC/app/bin/fncfd" "$out"
+    else
+        echo "FATAL: neither a Go toolchain nor a built app/bin/fncfd is available" >&2
+        exit 1
+    fi
+    chmod 755 "$out"
 }
 
 CMD="$APPS/cmd"
@@ -65,20 +128,6 @@ run() {
     bash "$CMD/$script" "$@"
 }
 
-# node is NOT on PATH on fnOS -- dependency apps are not added to it, which is
-# exactly why cmd/_lib probes the well-known install locations. Calling bare
-# `node` here made every node_eval step fail on the one host this suite is
-# written for (the NAS). Reuse _lib's find_node so the candidate list has a
-# single owner instead of a second copy drifting out of sync.
-. "$SRC/cmd/_lib"
-NODE="$(find_node)" || {
-    echo "FATAL: no node runtime found; this suite needs one (see cmd/_lib find_node)" >&2
-    exit 1
-}
-echo "node   : $NODE"
-
-node_eval() { "$NODE" -e "$1"; }
-
 cleanup() {
     bash "$CMD/main" stop >/dev/null 2>&1
     rm -rf "$SCRATCH"
@@ -87,6 +136,25 @@ trap cleanup EXIT
 
 # ------------------------------------------------------------------- the tests
 setup_install_root
+make_cloudflared_stub
+build_server_binary
+
+section "payload and lifecycle wiring"
+if "$APPS/target/bin/fncfd" --version >/dev/null 2>&1; then
+    ok "the service binary runs ($("$APPS/target/bin/fncfd" --version 2>/dev/null | head -n 1))"
+else
+    bad "the service binary does not run"
+fi
+if grep -q 'bin/fncfd' "$CMD/main"; then
+    ok "cmd/main launches the service binary directly"
+else
+    bad "cmd/main does not reference bin/fncfd"
+fi
+if grep -Eq 'find_node|TRIM_NODE_BIN|nodejs_v' "$CMD"/*; then
+    bad "a lifecycle script still probes an interpreter runtime"
+else
+    ok "no lifecycle script probes a runtime (the payload is self-contained)"
+fi
 
 section "install_init"
 run install_init
@@ -145,65 +213,61 @@ run main status
 check "status running after restart" 0 $?
 
 section "config_callback merges without losing tunnels or tokens"
-node_eval '
-const fs = require("fs");
-const p = process.env.TRIM_PKGVAR + "/config.json";
-const c = JSON.parse(fs.readFileSync(p, "utf8"));
-c.tunnels = [{ id: "keepme", name: "Keep Me", type: "token", token: "secret-token", enabled: true }];
-c.settings = c.settings || {};
-c.settings.logLevel = "info";
-fs.writeFileSync(p, JSON.stringify(c, null, 2));
-'
+# Write a config.json that already has a tunnel with a token, then let the
+# wizard answer change the settings. The tunnel and its token must survive: the
+# settings page and the web UI are two writers of the same file.
+cat >"$TRIM_PKGVAR/config.json" <<'JSON'
+{
+  "version": 1,
+  "settings": {
+    "protocol": "auto",
+    "logLevel": "info",
+    "metricsPort": 0,
+    "autoStart": true,
+    "autoRestart": true
+  },
+  "tunnels": [
+    {
+      "id": "keepme",
+      "name": "Keep Me",
+      "type": "token",
+      "enabled": true,
+      "autoStart": true,
+      "autoDns": true,
+      "token": "secret-token"
+    }
+  ]
+}
+JSON
+chmod 600 "$TRIM_PKGVAR/config.json"
 export wizard_log_level=debug wizard_protocol=http2 wizard_auto_start=false wizard_auto_restart=false
 run config_callback
 check "config_callback exit code" 0 $?
-MERGED="$(node_eval '
-const c = require(process.env.TRIM_PKGVAR + "/config.json");
-console.log([c.settings.logLevel, c.settings.protocol, c.settings.autoStart, c.settings.autoRestart,
-  c.tunnels.length, c.tunnels[0].id, c.tunnels[0].token].join("|"));
-')"
-check "settings merged, tunnel + token preserved" \
-    "debug|http2|false|false|1|keepme|secret-token" "$MERGED"
+grep -q '"logLevel": "debug"' "$TRIM_PKGVAR/config.json" && ok "settings merged: logLevel" || bad "logLevel not merged"
+grep -q '"protocol": "http2"' "$TRIM_PKGVAR/config.json" && ok "settings merged: protocol" || bad "protocol not merged"
+grep -q '"autoStart": false' "$TRIM_PKGVAR/config.json" && ok "settings merged: autoStart" || bad "autoStart not merged"
+grep -q '"autoRestart": false' "$TRIM_PKGVAR/config.json" && ok "settings merged: autoRestart" || bad "autoRestart not merged"
+grep -q '"id": "keepme"' "$TRIM_PKGVAR/config.json" && ok "tunnel definition preserved" || bad "tunnel definition lost"
+grep -q '"token": "secret-token"' "$TRIM_PKGVAR/config.json" && ok "tunnel token preserved" || bad "tunnel token lost"
 check "config.json mode" 600 "$(stat -c %a "$TRIM_PKGVAR/config.json" 2>/dev/null)"
 
 section "config_callback rejects out-of-enum values"
-node_eval '
-const fs = require("fs");
-const p = process.env.TRIM_PKGVAR + "/config.json";
-const c = JSON.parse(fs.readFileSync(p, "utf8"));
-c.settings.logLevel = "debug";
-fs.writeFileSync(p, JSON.stringify(c, null, 2));
-'
 export wizard_log_level="../../etc/passwd" wizard_protocol="bogus"
 run config_callback
 check "config_callback exit code" 0 $?
-REJECTED="$(node_eval '
-const c = require(process.env.TRIM_PKGVAR + "/config.json");
-console.log(c.settings.logLevel + "|" + c.settings.protocol);
-')"
-check "invalid values ignored, previous kept" "debug|http2" "$REJECTED"
+grep -q '"logLevel": "debug"' "$TRIM_PKGVAR/config.json" && ok "invalid logLevel ignored, previous kept" || bad "invalid logLevel was written"
+grep -q '"protocol": "http2"' "$TRIM_PKGVAR/config.json" && ok "invalid protocol ignored, previous kept" || bad "invalid protocol was written"
 unset wizard_log_level wizard_protocol
 
 section "a token tunnel keeps the token out of the process command line"
 # A token passed as an argv flag would be readable by any local user through
 # /proc/<pid>/cmdline, so the server must hand it over via TUNNEL_TOKEN.
-TOKEN="$(node_eval '
-console.log(Buffer.from(JSON.stringify({
-  a: "00000000000000000000000000000000",
-  t: "00000000-0000-0000-0000-000000000000",
-  s: "SECRETTOKENMARKER",
-})).toString("base64"));
-')"
+TOKEN="$(printf '%s' '{"a":"00000000000000000000000000000000","t":"00000000-0000-0000-0000-000000000000","s":"SECRETTOKENMARKER"}' | base64 | tr -d '\n')"
 CREATED="$(curl -s --max-time 5 --unix-socket "$TRIM_APPDEST/app.sock" \
     -H 'Content-Type: application/json' \
     -d "{\"name\":\"argv-test\",\"type\":\"token\",\"token\":\"$TOKEN\"}" \
     http://localhost/api/tunnels)"
-TID="$(printf '%s' "$CREATED" | node_eval '
-let s = "";
-process.stdin.on("data", (d) => (s += d)).on("end", () => {
-  try { console.log(JSON.parse(s).tunnel.id); } catch (e) { console.log(""); }
-});
-')"
+TID="$(printf '%s' "$CREATED" | grep -o '"id":"[^"]*"' | head -n 1 | cut -d'"' -f4)"
 if [ -n "$TID" ]; then ok "token tunnel created ($TID)"; else bad "could not create tunnel: $CREATED"; fi
 
 # autoStart 默认开启：创建响应里就该是 starting，而不是 stopped（否则用户保存后
@@ -286,11 +350,12 @@ check "uninstall_callback exit code" 0 $?
 
 section "start fails loudly when the payload is missing"
 setup_install_root
+make_cloudflared_stub
 export TRIM_APPDEST="$SCRATCH/empty-target"
 mkdir -p "$TRIM_APPDEST"
 run main start
 RC=$?
-if [ "$RC" -ne 0 ]; then ok "start fails without server.js (rc=$RC)"; else bad "start succeeded without server.js"; fi
+if [ "$RC" -ne 0 ]; then ok "start fails without the service binary (rc=$RC)"; else bad "start succeeded without the service binary"; fi
 if grep -q '应用文件缺失' "$TRIM_TEMP_LOGFILE" 2>/dev/null; then
     ok "error surfaced through TRIM_TEMP_LOGFILE"
 else
