@@ -137,12 +137,28 @@ A–C 这一类的缺陷在 Go 下由编译器直接拦住：未 import 的包�
 | 测试 | 命令 | 依赖 |
 | --- | --- | --- |
 | 全部单元测试 | `go test ./...` | 仅 Go |
-| 竞态检测 | `CGO_ENABLED=1 go test -race ./...` | 需 cgo（Windows 上需 gcc；建议在 Linux 上跑） |
+| 竞态检测 | `CGO_ENABLED=1 go test -race ./...` | 需 cgo（Linux 或 WSL；Windows 上没有 gcc 跑不了） |
 | 静态检查 | `go vet ./...` | 仅 Go |
 | UI 选择器契约 | `go run ./tools/lintui` | 仅 Go |
 | 生命周期脚本静态契约 | `go run ./tools/lintshell` | 仅 Go |
 | JSON 配置校验 | `go run ./tools/validatejson ...` | 仅 Go |
-| 模拟安装 | `setsid ./tools/test-lifecycle.sh` | 需 Linux + `/proc`、`curl` |
+| 模拟安装 | `setsid ./tools/test-lifecycle.sh` | Linux（NAS 或 WSL）：`/proc`、`ps`、`curl`、unix socket |
+
+在 Windows 上开发时，后两项需要 Linux 语义，用 WSL 即可跑通：
+
+```bash
+wsl -e bash -lc 'cd /mnt/d/.../fnos-cloudflared && \
+  PATH=$HOME/go-toolchain/go/bin:$PATH CGO_ENABLED=1 go test -race ./...'
+```
+
+`tools/test-lifecycle.sh` 建议先复制到 WSL 原生文件系统再跑（`/mnt/d` 是 drvfs，
+`chmod` 语义不完整，会让权限断言失真）：
+
+```bash
+wsl -e bash -lc 'mkdir -p ~/fncfd-test && cd ~/fncfd-test && \
+  cp -a /mnt/d/.../fnos-cloudflared/{go.mod,cmd,internal,cloudflared,tools} . && \
+  setsid bash tools/test-lifecycle.sh'
+```
 
 后端测试覆盖的关键回归：
 

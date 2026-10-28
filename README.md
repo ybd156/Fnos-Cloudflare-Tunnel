@@ -143,10 +143,18 @@ go run ./tools/lintui   # 前端选择器契约
 go run ./tools/lintshell# 生命周期脚本静态契约
 ```
 
-竞态检测需要 cgo，Windows 上还要有 gcc，建议在 Linux 上跑：
+竞态检测需要 cgo（Windows 上没有 gcc），生命周期套件需要 Linux 语义
+（`/proc`、`ps`、`curl`、unix socket）。在 Windows 上开发时用 WSL 跑这两项：
 
 ```bash
-CGO_ENABLED=1 go test -race ./...
+# 竞态检测
+wsl -e bash -lc 'cd /mnt/d/.../fnos-cloudflared && \
+  PATH=$HOME/go-toolchain/go/bin:$PATH CGO_ENABLED=1 go test -race ./...'
+
+# 模拟安装（先复制到 WSL 原生盘：/mnt/d 是 drvfs，chmod 语义不完整）
+wsl -e bash -lc 'mkdir -p ~/fncfd-test && cd ~/fncfd-test && \
+  cp -a /mnt/d/.../fnos-cloudflared/{go.mod,cmd,internal,cloudflared,tools} . && \
+  setsid bash tools/test-lifecycle.sh'
 ```
 
 安装 `.fpk` 需要 root，因此项目自带一个**模拟安装**测试，在临时目录里复现应用中心
