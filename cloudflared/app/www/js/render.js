@@ -267,6 +267,39 @@ function factHtml(label, valueHtml, subHtml) {
         </div>`;
 }
 
+/* Public addresses of a tunnel.
+ *
+ * `t.url` is only ever populated for a quick tunnel: it is scraped from the
+ * "https://….trycloudflare.com" line cloudflared prints. A locally-managed or
+ * custom-config tunnel serves whatever its ingress rules name, so its public
+ * addresses are the hostnames in `t.ingress`. Reporting "未分配" for a tunnel that
+ * is happily serving three domains was simply wrong.
+ *
+ * A token tunnel's ingress lives in the Cloudflare dashboard and never reaches
+ * this app, so it has no addresses to show here -- that case must say so rather
+ * than pretend nothing is configured.
+ */
+function publicAddresses(t) {
+  const out = [];
+  const seen = new Set();
+  /* href may be empty for an address that cannot be opened directly (a wildcard
+     hostname); such an entry is still listed, just not as a link. */
+  const add = (label, href) => {
+    const key = href || 'plain:' + label;
+    if (!label || seen.has(key)) return;
+    seen.add(key);
+    out.push({ label, href });
+  };
+
+  if (t.url) add(t.url, t.url);
+  for (const rule of Array.isArray(t.ingress) ? t.ingress : []) {
+    const host = String((rule && rule.hostname) || '').trim();
+    if (!host) continue;
+    add(host, host.startsWith('*.') ? '' : 'https://' + host);
+  }
+  return out;
+}
+
 function factsHtml(t, origin) {
   const running = (t.status || 'stopped') === 'running';
   /* "运行时长" only means something while the process is up. For a stopped
@@ -281,9 +314,18 @@ function factsHtml(t, origin) {
     uptime = factHtml('运行时长', '—', '尚未启动');
   }
 
-  const url = t.url
-    ? factHtml('公网地址', `<a class="link mono" href="${esc(t.url)}" target="_blank" rel="noreferrer">${esc(t.url)}</a>`, '')
-    : factHtml('公网地址', '未分配', t.type === 'token' ? '域名由 Cloudflare 控制台管理' : '');
+  const addrs = publicAddresses(t);
+  let url;
+  if (addrs.length === 1) {
+    const only = addrs[0];
+    url = factHtml('公网地址', addressHtml(only), '');
+  } else if (addrs.length > 1) {
+    url = factHtml('公网地址', `<span class="addr-list">${addrs.map(addressHtml).join('')}</span>`, `${addrs.length} 个域名`);
+  } else if (t.type === 'token') {
+    url = factHtml('公网地址', '由云端管理', 'Token 隧道的域名在 Cloudflare 控制台配置');
+  } else {
+    url = factHtml('公网地址', '未分配', '尚未添加入站规则');
+  }
 
   const originFact = factHtml(
     '源站',
@@ -297,6 +339,13 @@ function factsHtml(t, origin) {
         ${url}
         ${originFact}
       </div>`;
+}
+
+/* One address as a link, or as plain text when it cannot be opened directly
+   (a wildcard hostname). */
+function addressHtml(addr) {
+  if (!addr.href) return `<span class="mono">${esc(addr.label)}</span>`;
+  return `<a class="link mono" href="${esc(addr.href)}" target="_blank" rel="noreferrer">${esc(addr.label)}</a>`;
 }
 
 /* The line-number switch is a reading aid, not tunnel data: like the fold, it
