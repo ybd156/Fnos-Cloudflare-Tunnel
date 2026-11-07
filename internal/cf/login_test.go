@@ -53,6 +53,13 @@ func TestLoginFailureMessage(t *testing.T) {
 		t.Fatalf("message = %s", bare)
 	}
 
+	// A DNS failure gets its own explanation: it is not a login problem, and
+	// telling the user to retry would waste their time.
+	dns := loginFailureMessage(1, "lookup login.cloudflareaccess.org on 192.168.80.1:53: read: connection refused", bin)
+	if !strings.Contains(dns, "DNS 解析失败") {
+		t.Fatalf("DNS failure is not explained: %s", dns)
+	}
+
 	// Exit 0 with no certificate is a cancellation, not a failure.
 	if got := loginFailureMessage(0, "whatever", bin); got != "登录已取消，未获取到 cert.pem" {
 		t.Fatalf("cancellation message = %q", got)

@@ -221,6 +221,10 @@ func loginFailureMessage(code int, detail, bin string) string {
 	msg := fmt.Sprintf("登录进程退出（退出码 %d），未获取到 cert.pem", code)
 	if detail != "" {
 		msg += "：" + detail
+		if looksLikeDNSError(detail) {
+			msg += "（这是 DNS 解析失败，不是登录本身的问题：NAS 的 DNS 服务器拒绝了查询或解析不到该域名。" +
+				"请检查系统网络设置里的 DNS，或点「网络自检」查看每一步的结果）"
+		}
 	}
 	if bin != "" {
 		msg += "。可在 NAS 上手动执行 " + bin + " tunnel login 完成授权"

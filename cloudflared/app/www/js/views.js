@@ -34,7 +34,34 @@ export function renderAccount() {
            <p style="margin:10px 0"><a class="link" href="${esc(acc.url)}" target="_blank" rel="noreferrer">${esc(acc.url)}</a></p>
            <p class="hint"><span class="spin"></span> 等待授权完成… 授权成功后本页会自动刷新。</p>`
         : `<button class="btn btn-primary" id="btn-login">登录 Cloudflare</button>`}
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn" id="btn-netcheck">网络自检</button>
+      </div>
+      <div id="net-check-list"></div>
       ${acc.error ? `<div class="alert err" style="margin-top:12px"><span class="alert-body">${esc(acc.error)}</span></div>` : ''}`;
+
+    const netBtn = $('#btn-netcheck');
+    if (netBtn) {
+      netBtn.addEventListener('click', async () => {
+        const box = $('#net-check-list');
+        box.innerHTML = '<p class="hint"><span class="spin"></span> 正在检查 DNS 与连通性…</p>';
+        try {
+          const data = await api('GET', '/diagnose');
+          box.innerHTML = data.checks
+            .map((c) => `
+              <div class="kv">
+                <div><span>${esc(c.name)}</span><strong>${c.ok ? '通过' : '失败'}</strong></div>
+                <div><code>${esc(c.detail)}</code></div>
+              </div>`)
+            .join('') +
+            (data.ok
+              ? ''
+              : `<div class="alert err" style="margin-top:10px"><span class="alert-body">解析或连接失败通常不是应用的问题：请检查 NAS 系统网络设置里的 DNS 服务器，或在路由器上放通 UDP 53。</span></div>`);
+        } catch (err) {
+          box.innerHTML = `<div class="alert err"><span class="alert-body">${esc(err.message)}</span></div>`;
+        }
+      });
+    }
 
     const loginBtn = $('#btn-login');
     if (loginBtn) {

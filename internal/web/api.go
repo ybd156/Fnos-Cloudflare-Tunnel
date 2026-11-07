@@ -45,6 +45,8 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request, apiPath strin
 		s.handleAccount(w, r, id, action, extra)
 	case "logs":
 		s.handleAppLog(w, r)
+	case "diagnose":
+		s.handleDiagnose(w, r)
 	case "binary":
 		s.handleBinary(w, r, id)
 	default:
