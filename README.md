@@ -6,6 +6,10 @@
 客户端，可在**不开放任何路由器端口**的前提下，把 NAS 上的服务安全发布到公网，
 并自动获得 HTTPS 证书。
 
+> **给 AI 编码 agent**：先读 [`AGENTS.md`](AGENTS.md)。里面有模块地图、命令、12 条硬约束
+> （执行位、AF_UNIX 路径长度、pin 校验、合并语义……）和这一路踩过的坑；包边界与缺陷史见
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [`docs/DESIGN.md`](docs/DESIGN.md)。
+
 ## 功能
 
 | 隧道类型 | 说明 | 是否需要 Cloudflare 账户 |
