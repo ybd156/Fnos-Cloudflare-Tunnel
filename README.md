@@ -353,7 +353,7 @@ A：说明载荷里的 `bin/fncfd` 或 `bin/cloudflared` 没到位或没有可�
 
 A：按这个顺序查，四条覆盖了绝大多数情况：
 
-1. **Cloudflare 的单次请求体上限是 100MB**（Free/Pro/Business 套餐；Enterprise 可申请提高）。
+1. **Cloudflare 的单次请求体上限**：Free/Pro 为 100MB，Business 200MB，Enterprise 可申请更高。
    超过就返回 `413 Request Entity Too Large`，看起来像"传到一半断了"。这是套餐限制，
    应用侧无法绕过：换用分片上传的客户端（很多网盘/相册应用默认就是），或走局域网直连。
 2. **传输协议换 HTTP/2**：「设置 → 传输协议」选 `http2`。QUIC 走 UDP，在丢包或 MTU 不佳
