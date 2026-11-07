@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ybd156/fnos-cloudflared/internal/config"
+	"github.com/ybd156/fnos-cloudflared/internal/dnsroute"
 	"github.com/ybd156/fnos-cloudflared/internal/fsx"
 	"github.com/ybd156/fnos-cloudflared/internal/paths"
 	"github.com/ybd156/fnos-cloudflared/internal/runner"
@@ -148,11 +149,24 @@ func (s *Server) repairDNS(w http.ResponseWriter, r *http.Request, id string) {
 	res := s.DNS.Ensure(tunnel)
 	s.Run.SetDNSResult(id, res)
 
-	status := http.StatusOK
 	if !res.OK {
-		status = http.StatusBadRequest
+		sendJSON(w, http.StatusBadRequest, dnsFailure{Result: res, Error: res.Message})
+		return
 	}
-	sendJSON(w, status, res)
+	sendJSON(w, http.StatusOK, res)
+}
+
+// dnsFailure is the body of a failed manual DNS repair: the same fields as a
+// successful run, plus the "error" key.
+//
+// The frontend's request helper reports data.error for any non-2xx response and
+// falls back to "请求失败 (400)" otherwise. dnsroute.Result has no such field, so
+// every failed repair reached the user as that generic message and the reason
+// it carried -- not logged in, tunnel UUID unknown, an API rejection -- was
+// thrown away, which is exactly what the button exists to explain.
+type dnsFailure struct {
+	dnsroute.Result
+	Error string `json:"error"`
 }
 
 func (s *Server) restartTunnel(w http.ResponseWriter, r *http.Request, id string) {

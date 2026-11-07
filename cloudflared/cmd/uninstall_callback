@@ -7,6 +7,11 @@ set -u
 # Best-effort removal of anything that would otherwise be left behind.
 rm -f "${APPDEST}/app.sock" 2>/dev/null || true
 rm -f "${PKGVAR}/server.pid" 2>/dev/null || true
+# The single-instance lock is a runtime artefact like the PID file: it lives in
+# the data directory and the kernel releases it when the process exits, so
+# nothing needs it after uninstall. Left behind, it survived even a
+# "delete my data" uninstall.
+rm -f "${PKGVAR}/server.lock" 2>/dev/null || true
 
 # The uninstall wizard decides whether tunnel definitions and credentials are
 # kept for a future reinstall.

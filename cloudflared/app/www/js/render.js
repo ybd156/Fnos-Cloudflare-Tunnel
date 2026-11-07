@@ -109,6 +109,14 @@ export function renderMeta() {
   acc.className = 'pill ' + (meta.loggedIn ? 'ok' : '');
 
   $('#bin-version').textContent = meta.cloudflared || '未知';
+  // Which copy is actually in use: the one shipped in the package, or one
+  // updated in place into $PKGVAR. They live in different directories and
+  // survive upgrades differently, so the user cannot tell them apart from the
+  // version string alone -- 1.4.6 promised this line and the field went unused.
+  const source = $('#bin-source');
+  if (source) {
+    source.textContent = meta.binarySource === 'updated' ? '已更新（数据目录）' : '内置（随应用安装）';
+  }
   $('#bin-path').textContent = meta.binary || '—';
   $('#brand-sub').textContent = `飞牛 fnOS 内网穿透 · Go ${meta.runtime} · ${meta.arch}`;
 }
