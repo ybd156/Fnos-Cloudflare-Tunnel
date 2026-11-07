@@ -135,12 +135,20 @@ func (r *Runner) watchLogin(gen int, cmd *exec.Cmd, stdout, stderr io.Reader) {
 	// everything seen so far rather than against one chunk.
 	var mu sync.Mutex
 	seen := ""
-	scan := func(rd io.Reader) {
+	// stderrTail keeps the child's own last words. Without them a failed login
+	// only ever reported "exit code 1", which is a dead end for the user: the
+	// actual reason (port already in use, blocked connection, unwritable HOME)
+	// was read out of the pipe and thrown away.
+	stderrTail := newLoginTail(4096)
+	scan := func(rd io.Reader, tail *loginTail) {
 		defer wg.Done()
 		buf := make([]byte, 4096)
 		for {
 			n, err := rd.Read(buf)
 			if n > 0 {
+				if tail != nil {
+					tail.write(buf[:n])
+				}
 				mu.Lock()
 				if len(seen) < 64<<10 {
 					seen += string(buf[:n])
@@ -154,8 +162,8 @@ func (r *Runner) watchLogin(gen int, cmd *exec.Cmd, stdout, stderr io.Reader) {
 		}
 	}
 	wg.Add(2)
-	go scan(stdout)
-	go scan(stderr)
+	go scan(stdout, nil)
+	go scan(stderr, stderrTail)
 	wg.Wait()
 
 	code := 0
@@ -165,7 +173,59 @@ func (r *Runner) watchLogin(gen int, cmd *exec.Cmd, stdout, stderr io.Reader) {
 			code = c
 		}
 	}
-	r.finishLogin(gen, code)
+	r.finishLogin(gen, code, stderrTail.lastLines(3))
+}
+
+// loginTail keeps the tail of a stream so a failed login can say why.
+type loginTail struct {
+	mu    sync.Mutex
+	buf   []byte
+	limit int
+}
+
+func newLoginTail(limit int) *loginTail { return &loginTail{limit: limit} }
+
+func (t *loginTail) write(p []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.limit {
+		t.buf = t.buf[len(t.buf)-t.limit:]
+	}
+}
+
+// lastLines returns the final n non-empty lines, joined for a one-line message.
+func (t *loginTail) lastLines(n int) string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []string
+	for _, line := range strings.Split(string(t.buf), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	if len(out) > n {
+		out = out[len(out)-n:]
+	}
+	return strings.Join(out, "；")
+}
+
+// loginFailureMessage is what the account page shows when the login child ends
+// without a certificate: the exit code, cloudflared's own last words when there
+// are any, and the command that finishes the authorisation by hand so the user
+// is never left with a dead end.
+func loginFailureMessage(code int, detail, bin string) string {
+	if code == 0 {
+		return "登录已取消，未获取到 cert.pem"
+	}
+	msg := fmt.Sprintf("登录进程退出（退出码 %d），未获取到 cert.pem", code)
+	if detail != "" {
+		msg += "：" + detail
+	}
+	if bin != "" {
+		msg += "。可在 NAS 上手动执行 " + bin + " tunnel login 完成授权"
+	}
+	return msg
 }
 
 func (r *Runner) captureLoginURL(gen int, text string) {
@@ -187,7 +247,7 @@ func (r *Runner) captureLoginURL(gen int, text string) {
 	}
 }
 
-func (r *Runner) finishLogin(gen, code int) {
+func (r *Runner) finishLogin(gen, code int, detail string) {
 	r.loginMu.Lock()
 	defer r.loginMu.Unlock()
 	if r.login.gen != gen {
@@ -207,10 +267,9 @@ func (r *Runner) finishLogin(gen, code int) {
 	// authorisation -- a cancellation, not a failure. Only a non-zero exit is an
 	// actual error.
 	r.login.status = "error"
-	if code == 0 {
-		r.login.errMsg = "登录已取消，未获取到 cert.pem"
-	} else {
-		r.login.errMsg = fmt.Sprintf("登录进程退出（退出码 %d），未获取到 cert.pem", code)
+	r.login.errMsg = loginFailureMessage(code, detail, r.p.ActiveCFBin())
+	if code != 0 {
+		r.warn("cloudflared login failed:", r.login.errMsg)
 	}
 }
 
