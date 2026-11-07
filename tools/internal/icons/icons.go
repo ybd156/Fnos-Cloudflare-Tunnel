@@ -2,10 +2,21 @@
 //
 // Port of the old tools/make-icons.py, which used only zlib + struct so it
 // could run on any fnOS box without Pillow or ImageMagick. The Go version uses
-// only image/png from the standard library and keeps the same drawing: a
-// rounded-square badge with a Cloudflare-orange vertical gradient, a white
-// cloud, and a downward arrow (the "tunnel" motif), rendered with
-// supersampling and un-premultiplied edges.
+// only image/png from the standard library.
+//
+// The mark is a cloud with a tunnel mouth notched out of its base, drawn as a
+// single flat silhouette in Cloudflare orange on a deep slate rounded square.
+// Flat on purpose: no gradient, no bloom, no drop shadow.
+//
+// The shape went through several drafts. Anything that put a second glyph under
+// the cloud -- an arrow, a chevron, a separate arch -- read as two stacked
+// stickers at 64px, and the arrow variant read as a tree, because a shaft under
+// a wide rounded canopy is the silhouette of a tree however the head is
+// proportioned. Notching the tunnel mouth out of the cloud itself keeps one
+// unmistakable silhouette at every size.
+//
+// Everything is drawn with supersampling and un-premultiplied edges, so the
+// curves stay clean at 64px without any antialiasing library.
 package icons
 
 import (
@@ -33,11 +44,12 @@ var Outputs = []struct {
 	{"app/www/images/icon_256.png", 256},
 }
 
-// Cloudflare orange gradient (top -> bottom), sRGB.
+// Flat two-colour palette: a deep slate badge with a single Cloudflare-orange
+// glyph. No gradient, no bloom, no drop shadow -- the brief is a flat mark, and
+// the orange-on-slate pairing is what keeps it recognisable as Cloudflare.
 const (
-	topR, topG, topB = 0xF9, 0xA1, 0x4A
-	botR, botG, botB = 0xE0, 0x5A, 0x0B
-	white            = 0xFF
+	bgR, bgG, bgB = 0x12, 0x1C, 0x2E
+	fgR, fgG, fgB = 0xF6, 0x82, 0x1F
 )
 
 // Generate writes every icon under root/cloudflared and reports one line each.
@@ -83,12 +95,9 @@ func render(size, supersample int) *image.RGBA {
 						continue
 					}
 
-					t := fy / big
-					r := lerp(topR, botR, t)
-					g := lerp(topG, botG, t)
-					b := lerp(topB, botB, t)
-					if cloudAndArrow(fx, fy, big) {
-						r, g, b = white, white, white
+					r, g, b := float64(bgR), float64(bgG), float64(bgB)
+					if fr, fg, fb, ok := foreground(fx, fy, big); ok {
+						r, g, b = fr, fg, fb
 					}
 					rAcc += r
 					gAcc += g
@@ -179,26 +188,50 @@ func inTriangle(x, y, p0x, p0y, p1x, p1y, p2x, p2y float64) bool {
 	return !(hasNeg && hasPos)
 }
 
-// cloudAndArrow is the white foreground mask. Coordinates are normalised to
-// 0..1 and then scaled by s.
-func cloudAndArrow(x, y, s float64) bool {
-	// --- cloud: three bumps over a flat base ---------------------------
-	if inCircle(x, y, 0.325*s, 0.420*s, 0.110*s) {
-		return true
+// inRoundRectBox is a rounded rectangle given by two corners plus a corner
+// radius. inRoundedRect only knows squares centred on the canvas, and the
+// cloud's base is neither square nor centred.
+func inRoundRectBox(x, y, x0, y0, x1, y1, r float64) bool {
+	if x < x0 || x > x1 || y < y0 || y > y1 {
+		return false
 	}
-	if inCircle(x, y, 0.505*s, 0.360*s, 0.155*s) {
-		return true
-	}
-	if inCircle(x, y, 0.670*s, 0.425*s, 0.110*s) {
-		return true
-	}
-	if inRect(x, y, 0.215*s, 0.415*s, 0.785*s, 0.545*s) {
-		return true
-	}
+	cx := math.Min(math.Max(x, x0+r), x1-r)
+	cy := math.Min(math.Max(y, y0+r), y1-r)
+	dx := x - cx
+	dy := y - cy
+	return dx*dx+dy*dy <= r*r
+}
 
-	// --- downward arrow (the tunnel) -----------------------------------
-	if inRect(x, y, 0.455*s, 0.525*s, 0.545*s, 0.670*s) {
-		return true
+// foreground is the mark, painted in a single flat colour.
+func foreground(x, y, s float64) (float64, float64, float64, bool) {
+	if inCloud(x, y, s) {
+		return float64(fgR), float64(fgG), float64(fgB), true
 	}
-	return inTriangle(x, y, 0.365*s, 0.655*s, 0.635*s, 0.655*s, 0.500*s, 0.810*s)
+	return 0, 0, 0, false
+}
+
+// inCloud is the whole mark: three overlapping domes over a rounded base, in
+// one flat colour.
+//
+// Earlier drafts tried to spell out "tunnel" inside the glyph -- an arrow under
+// the cloud (which read as a tree: a shaft under a wide rounded canopy is the
+// silhouette of a tree however the head is proportioned), a chevron, a separate
+// arch, and finally a tunnel mouth notched out of the cloud's base. Every one
+// of them either became two stacked stickers at 64px or turned the cloud into a
+// blob with a bite taken out of it. The badge is dark and the glyph is one
+// colour; the app is called Cloudflare Tunnel, and the cloud carries the brand
+// far better than any second symbol did.
+func inCloud(x, y, s float64) bool {
+	// Map the canvas onto the mark's own 0..1 box, zoomed in and nudged down:
+	// an app icon reads better with the glyph filling most of the badge, and
+	// optical centring sits it slightly below the geometric middle.
+	const zoom = 1.16
+	const shiftY = 0.045
+	nx := (x/s-0.5)/zoom + 0.5
+	ny := (y/s-(0.5+shiftY))/zoom + 0.5
+
+	return inCircle(nx*s, ny*s, 0.295*s, 0.445*s, 0.140*s) ||
+		inCircle(nx*s, ny*s, 0.500*s, 0.362*s, 0.192*s) ||
+		inCircle(nx*s, ny*s, 0.705*s, 0.440*s, 0.133*s) ||
+		inRoundRectBox(nx*s, ny*s, 0.160*s, 0.418*s, 0.840*s, 0.615*s, 0.090*s)
 }
