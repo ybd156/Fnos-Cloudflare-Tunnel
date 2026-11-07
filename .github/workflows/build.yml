@@ -1,0 +1,153 @@
+name: build
+
+# 三件事：
+#   push / PR        → 跑全部测试（含只能在 Linux 上跑的模拟安装套件）
+#   tag v*           → 额外打包 .fpk，校验版本与标签一致，发 GitHub Release
+#   workflow_dispatch → 手动跑一遍，产物作为 workflow artifact 留下
+#
+# 打包不需要仓库里存 38MB 的 cloudflared：tools/fetchcf 会按 cfpin 里固定的版本
+# 与 SHA-256 下载并校验；fnpack 同样按固定 URL + SHA-256 取。
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.22.x'
+  FNPACK_URL: 'https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64'
+  FNPACK_SHA256: '54b97fa7b70968c4d05c79840f5daeff508957d0bb2062fdb0376d00d9615c93'
+
+jobs:
+  test:
+    name: 测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./...
+
+      # 竞态检测需要 cgo，Linux runner 上本来就有 gcc；Windows 上没有。
+      - name: go test -race
+        run: go test -race ./...
+
+      # 安装 → 启动 → 网关 API → 设置页回调 → 卸载，真实跑一遍生命周期脚本。
+      # 这套件要 /proc、ps、unix socket 与 curl，只能在 Linux 上跑，所以本地
+      # 开发时它一直是 SKIP，CI 是它唯一的常规执行点。
+      - name: 模拟安装套件
+        run: setsid bash tools/test-lifecycle.sh
+
+  package:
+    name: 打包 .fpk
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 打标签时要建 Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: 安装 fnpack（校验 SHA-256）
+        run: |
+          set -euo pipefail
+          curl -fsSL "$FNPACK_URL" -o /tmp/fnpack
+          echo "$FNPACK_SHA256  /tmp/fnpack" | sha256sum -c -
+          sudo install -m 0755 /tmp/fnpack /usr/local/bin/fnpack
+          command -v fnpack
+
+      # build.sh 是一条完整流水线：拉取并校验 cloudflared → 生成图标 →
+      # 交叉编译 fncfd → 归一化权限 → 各 lint → fnpack → 逐字节复核产物。
+      # 任何一步失败都会让这一步红，不会产出「看起来成功」的包。
+      - name: 构建
+        run: ./build.sh
+
+      - name: 标签与 manifest 版本必须一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = //p' cloudflared/manifest)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::manifest 版本是 $version，标签是 $tag；先改 cloudflared/manifest 再打标签"
+            exit 1
+          fi
+
+      - name: 重命名并生成校验文件
+        id: artefact
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = //p' cloudflared/manifest)"
+          asset="cloudflared-${version}.fpk"
+          mv dist/cloudflared.fpk "dist/${asset}"
+          ( cd dist && sha256sum "$asset" > "$asset.sha256" && cat "$asset.sha256" )
+          {
+            echo "version=$version"
+            echo "asset=$asset"
+            echo "sha256=$(cut -d' ' -f1 "dist/$asset.sha256")"
+            echo "size=$(( $(stat -c %s "dist/$asset") / 1024 / 1024 ))MB"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cloudflared-${{ steps.artefact.outputs.version }}
+          path: |
+            dist/*.fpk
+            dist/*.sha256
+          if-no-files-found: error
+
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.fpk
+            dist/*.sha256
+          fail_on_unmatched_files: true
+          # GitHub 会把 body 前置到自动生成的 release notes 之前。
+          generate_release_notes: true
+          body: |
+
+            ---
+
+            ### 安装
+
+            1. 下载下方的 `cloudflared-${{ steps.artefact.outputs.version }}.fpk`（约 ${{ steps.artefact.outputs.size }}）
+            2. 飞牛 OS「应用中心」→ 右上角「手动安装」→ 选择该文件
+            3. 安装向导里确认是否「服务启动时自动运行已启用的隧道」
+
+            也可以在 NAS 的 root shell 里装：
+
+            ```bash
+            appcenter-cli install-fpk /path/to/cloudflared-${{ steps.artefact.outputs.version }}.fpk
+            ```
+
+            ### 校验
+
+            ```bash
+            sha256sum -c cloudflared-${{ steps.artefact.outputs.version }}.fpk.sha256
+            # 期望：${{ steps.artefact.outputs.sha256 }}
+            ```
+
+            这个包由本仓库的 GitHub Actions 从对应标签的源码构建：`tools/build` 会先按
+            `tools/internal/cfpin` 固定的版本与 SHA-256 拉取官方 cloudflared，再交叉编译
+            `fncfd`，最后重新打开产物逐项复核（容器结构、manifest 与源码逐字节相同、
+            归档权限位、内置二进制的哈希）。构建过程**不是**字节级可复现的：`app.tgz`
+            的 md5 会写进 manifest 的 `checksum`，而 tar 时间戳每次都会变。

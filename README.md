@@ -1,5 +1,7 @@
 # Cloudflare Tunnel for fnOS（飞牛 OS）
 
+[![build](https://github.com/ybd156/fnos-cloudflared/actions/workflows/build.yml/badge.svg)](https://github.com/ybd156/fnos-cloudflared/actions/workflows/build.yml)
+
 把 Cloudflare Tunnel（内网穿透）带到飞牛 OS 的应用。内置官方 `cloudflared`
 客户端，可在**不开放任何路由器端口**的前提下，把 NAS 上的服务安全发布到公网，
 并自动获得 HTTPS 证书。
@@ -32,6 +34,7 @@
 
 ```
 fnos-cloudflared/
+├── .github/workflows/        # GitHub Actions：测试 → 打包 → 发 Release
 ├── go.mod                    # Go 模块（只用标准库，无第三方依赖）
 ├── cmd/fncfd/                # 服务入口：监听、自动启动、优雅关停
 ├── internal/                 # 后端包，依赖严格单向
@@ -80,10 +83,42 @@ fnos-cloudflared/
 - `config.json` 的字段名、默认值与合并语义完全沿用，**隧道不需要重新配置**。
 - 账户凭据 `cert.pem` 与各隧道凭据原地保留。
 
-## 构建
+## 构建与发布
 
-需要 Go ≥ 1.22；打包还需要官方 `fnpack`（本项目已在 `/usr/local/bin/fnpack`，
-版本 1.2.4，下载地址 <https://static2.fnnas.com/fnpack/>）。**不再需要 Node 或 Python。**
+### 在 GitHub 上构建（推荐，也是 Release 的唯一来源）
+
+[`.github/workflows/build.yml`](.github/workflows/build.yml) 一个文件三件事：
+
+| 触发 | 动作 |
+| --- | --- |
+| push / PR | `go vet`、`go test`、`go test -race`，以及只能在 Linux 上跑的模拟安装套件 `tools/test-lifecycle.sh` |
+| push tag `v*` | 上面全部通过后打包 `.fpk`，断言标签与 `cloudflared/manifest` 的 `version` 一致，然后把 `cloudflared-<版本>.fpk` 和 `.sha256` 发到 GitHub Release |
+| 手动 dispatch | 只打包，产物留在 workflow artifact，不发 Release |
+
+流水线不依赖仓库里存二进制：cloudflared 由 `tools/fetchcf` 按 `tools/internal/cfpin`
+固定的版本与 SHA-256 拉取，`fnpack` 按固定 URL + SHA-256 取（都在 workflow 顶部的 `env` 里）。
+
+发一个版本：
+
+```bash
+# 1. 改版本号（manifest 是唯一来源；CI 会断言它与标签一致）
+sed -i 's/^version = .*/version = 1.4.10/' cloudflared/manifest
+# 2. 写 changelog（同一个文件，应用中心会显示它）
+# 3. 提交并推标签
+git commit -am 'chore: 1.4.10'
+git tag -a v1.4.10 -m '1.4.10'
+git push origin main --tags
+```
+
+**不要**手工往 Release 上传本地打出来的 `.fpk`：包不是字节级可复现的（`app.tgz` 的
+md5 会写进 manifest，而 tar 时间戳每次都变），手工上传会让「这个包来自哪个提交」
+无法追溯。要发包就推标签。
+
+### 本地构建
+
+需要 Go ≥ 1.22；打包还需要官方 `fnpack`（版本 1.2.3，Linux 版
+<https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64>，CI 用的就是它）。
+**不再需要 Node 或 Python。**
 
 ```bash
 ./build.sh              # 重新生成图标 → 校验 → 交叉编译 → 打包
@@ -95,7 +130,7 @@ Windows 上用等价封装：
 
 ```powershell
 pwsh -File build.ps1
-pwsh -File build.ps1 -NoIcons -Fnpack C:\tools\fnpack-1.2.4.exe
+pwsh -File build.ps1 -NoIcons -Fnpack C:\tools\fnpack.exe
 ```
 
 > **在 Windows 上建议改用 WSL 构建。** 目标平台是 Linux，在 WSL 里构建能省掉
