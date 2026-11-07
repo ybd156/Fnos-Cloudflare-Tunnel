@@ -25,8 +25,23 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/cloudflared"
-SCRATCH="$ROOT/work/fakeinstall"
+# The service binds a Unix socket inside the payload directory, and AF_UNIX
+# caps sun_path at 108 bytes. A CI checkout lives under
+# /home/runner/work/<repo>/<repo>/, which made the socket path 113 bytes: bind
+# failed, app.sock never appeared, and every API assertion after "main start"
+# failed with no hint about why. Keep the scratch tree short; override with
+# FNCFD_LIFECYCLE_SCRATCH when you need a specific location.
+SCRATCH="${FNCFD_LIFECYCLE_SCRATCH:-$(mktemp -d "${TMPDIR:-/tmp}/fncfd-lc.XXXXXX")}"
 APPS="$SCRATCH/apps/cloudflared"
+
+SOCKET_PATH="$APPS/target/app.sock"
+if [ "${#SOCKET_PATH}" -gt 100 ]; then
+    printf '%s\n' "ERROR: the payload path is ${#SOCKET_PATH} bytes:" >&2
+    printf '%s\n' "  $SOCKET_PATH" >&2
+    printf '%s\n' "AF_UNIX allows 108 bytes for sun_path, so the service cannot bind there." >&2
+    printf '%s\n' "Point FNCFD_LIFECYCLE_SCRATCH at a short directory and re-run." >&2
+    exit 1
+fi
 
 PASS=0
 FAIL=0
