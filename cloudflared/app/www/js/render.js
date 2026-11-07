@@ -308,6 +308,25 @@ function publicAddresses(t) {
   return out;
 }
 
+/* A transfer that died mid-flight is not something "retry" fixes: it is either
+   a request-body limit (a plan or origin limit the app cannot lift) or a
+   transport problem (QUIC stalling, a reset). The two have different fixes, so
+   the banner names which one dominates instead of saying "断流" and leaving the
+   user to guess. Counts come from the backend, which classifies the recent log
+   window with the same patterns the log panel colours. */
+function transferBannerHtml(t) {
+  const s = t.transfer;
+  if (!s || !s.interrupted) return '';
+  const parts = [];
+  if (s.tooLarge) parts.push(`${s.tooLarge} 次请求体过大（413）`);
+  if (s.reset) parts.push(`${s.reset} 次连接被中途切断`);
+  const detail = parts.length ? `：${parts.join('，')}` : '';
+  const advice = s.tooLarge >= s.reset
+    ? '单次请求体上限 Free/Pro 100MB、Business 200MB，大文件请用分片上传的客户端，或走局域网直连。'
+    : '多为 QUIC 在丢包或 MTU 不佳时断流，可在「设置 → 传输协议」改用 HTTP/2 后重启隧道。';
+  return `<div class="alert warn" style="margin-bottom:10px"><span class="alert-body">最近日志里有 ${s.interrupted} 次传输中断${esc(detail)}。${advice}</span></div>`;
+}
+
 function factsHtml(t, origin) {
   const running = (t.status || 'stopped') === 'running';
   /* "运行时长" only means something while the process is up. For a stopped
@@ -406,6 +425,7 @@ function tunnelCardHtml(t) {
   </div>
   <div class="card-body">
     ${t.error ? `<div class="alert err"><span class="alert-body">${esc(t.error)}</span></div>` : ''}
+    ${transferBannerHtml(t)}
     ${factsHtml(t, origin)}
     ${originPanelHtml(t)}
     <details class="card-more" data-details="${esc(t.id)}">

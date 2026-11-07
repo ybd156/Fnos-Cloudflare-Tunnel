@@ -57,6 +57,10 @@ type View struct {
 	// from "this field does not exist yet" without guessing.
 	OriginError *OriginError   `json:"originError"`
 	Origins     []OriginStatus `json:"origins"`
+
+	// Transfer failures in the recent log window. Zero values mean "nothing
+	// seen", which is what a healthy tunnel should report.
+	Transfer TransferStats `json:"transfer"`
 }
 
 // View renders one tunnel for the API. It creates the runtime record if the
@@ -100,6 +104,8 @@ func (m *Manager) View(t config.Tunnel) View {
 
 		Origins: originCopy(r.origins),
 	}
+	// Computed under the lock: the ring is being appended to by the log pump.
+	v.Transfer = ScanTransfers(r.log.tail(transferWindow))
 	if r.originErr != nil {
 		// Copy: the record may be overwritten by the next log line while the
 		// response is being serialised.
