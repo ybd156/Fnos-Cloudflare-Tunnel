@@ -24,6 +24,10 @@ var nodeViewKeys = []string{
 	// separate concern from the tunnel's own status, because a tunnel can be
 	// connected at the edge while every forwarded request fails.
 	"originError", "origins",
+	// Added in 1.4.14. Also an addition: a tunnel can be perfectly healthy and
+	// still fail every large upload, and the counts are what tell the two
+	// causes (body limit vs. cut connection) apart.
+	"transfer",
 }
 
 func TestViewJSONMatchesLegacyShape(t *testing.T) {
