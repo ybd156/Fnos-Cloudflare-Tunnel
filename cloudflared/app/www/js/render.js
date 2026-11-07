@@ -608,6 +608,12 @@ const LOG_CRITICAL_RE = /Unable to reach the origin|connection refused|no such h
    that does matter, so they get their own muted style. */
 const LOG_CANCEL_RE = /context canceled|canceled by remote with error code 0/i;
 
+/* A transfer that stopped mid-flight. Large uploads through a tunnel fail this
+   way -- the edge's 100MB request limit, an origin body limit, or a reset
+   connection -- and cloudflared logs them as ordinary ERR lines, so they used
+   to be indistinguishable from a dead origin. */
+const LOG_STREAM_RE = /Request Entity Too Large|413|stream (?:error|closed|reset)|unexpected EOF|connection reset by peer|broken pipe/i;
+
 /* cloudflared's own level token. Matched case-sensitively on purpose: every
    structured line carries an uppercase ERR / WRN, while the prose "error=" key
    appears in nearly all of them. Matching that case-insensitively painted the
@@ -645,6 +651,7 @@ export function paintLog(box, lines) {
       let cls = 'log-line';
       if (LOG_CRITICAL_RE.test(line)) cls += ' is-err';
       else if (LOG_CANCEL_RE.test(line)) cls += ' is-cancel';
+      else if (LOG_STREAM_RE.test(line)) cls += ' is-stream';
       else if (LOG_ERR_RE.test(line)) cls += ' is-err';
       else if (LOG_WARN_RE.test(line)) cls += ' is-warn';
       el.className = cls;

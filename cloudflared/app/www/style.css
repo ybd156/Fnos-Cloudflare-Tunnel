@@ -65,6 +65,10 @@
   --log-err-bg: rgba(248, 113, 113, 0.1);
   --log-warn: #f2c14e;
   --log-warn-bg: rgba(242, 193, 78, 0.09);
+  /* A transfer cut off mid-flight: large uploads die this way, and the line is
+     an ordinary ERR otherwise, which hides the one thing worth seeing. */
+  --log-stream: #8ab4f8;
+  --log-stream-bg: rgba(138, 180, 248, 0.1);
   /* The tunnel log is a fixed height on purpose: a max-height box grows line by
      line and moves the whole card on every poll. */
   --log-tunnel-h: 320px;
@@ -1225,6 +1229,14 @@ input[type="checkbox"] {
    alarming about: the origin did answer. */
 .log-line.is-cancel {
   color: var(--log-dim);
+}
+
+/* A transfer that stopped mid-flight -- an upload the edge or the origin cut
+   off, a reset connection. Neither "origin is down" (red) nor "client hung up"
+   (dim), so it gets its own colour instead of one of those two wrong ones. */
+.log-line.is-stream {
+  color: var(--log-stream);
+  background: var(--log-stream-bg);
 }
 
 /* Two buttons that belong together (update / revert), kept on one line and
