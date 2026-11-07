@@ -3,7 +3,6 @@ package applog
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -144,9 +143,6 @@ func TestAppendPrivateDoesNotRotateSmallLog(t *testing.T) {
 }
 
 func TestAppendPrivateMode(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows 不保留 POSIX 权限位")
-	}
 	dir := t.TempDir()
 	log := New(filepath.Join(dir, "server.log"))
 	log.Out = nil

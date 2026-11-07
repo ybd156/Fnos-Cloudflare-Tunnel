@@ -238,4 +238,4 @@ go vet ./...         # 静态检查（原先的 lint-requires 由编译器取代
 ```
 
 `tools/test-lifecycle.sh` 仍是唯一需要 Linux 的套件（真实跑一遍生命周期脚本），
-它在 NAS 上执行；Windows 上跳过。
+它在 NAS 上执行；非 Linux 宿主上跳过。

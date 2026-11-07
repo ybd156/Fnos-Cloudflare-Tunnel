@@ -207,12 +207,11 @@ func Run(root string, out io.Writer) error {
 		}
 	}
 
-	// ---------------------------------------- [4] the wrappers stay thin
-	// build.sh and build.ps1 used to each implement the same 12-step pipeline,
-	// and they drifted: one ran a JavaScript syntax check the other never had.
-	// Both now only locate Go and hand over to tools/build, so the steps exist
-	// in exactly one place.
-	l.section("[4] build.sh / build.ps1 只做薄封装")
+	// ---------------------------------------- [4] the wrapper stays thin
+	// build.sh used to implement the whole 12-step pipeline itself, next to a
+	// second copy in a PowerShell script; the two drifted. It now only locates
+	// Go and hands over to tools/build, so the steps exist in exactly one place.
+	l.section("[4] build.sh 只做薄封装")
 	if sh, err := l.read("build.sh"); err != nil {
 		l.ck(false, "build.sh 可读", err.Error())
 	} else {
@@ -221,16 +220,6 @@ func Run(root string, out io.Writer) error {
 		l.ck(!pyToolRE.MatchString(sh), "build.sh: 不再调用 tools/*.py 或 *.mjs")
 		l.ck(!nodeToolRE.MatchString(sh), "build.sh: 不再需要 node/python")
 	}
-	if ps, err := l.read("build.ps1"); err != nil {
-		l.ck(false, "build.ps1 可读", err.Error())
-	} else {
-		l.ck(strings.Contains(ps, "tools/build"), "build.ps1: 转调 tools/build（不再自己实现步骤）")
-		for _, dup := range []string{"make-icons", "normalize-fpk", "validate-json", "verify-fpk", "lint-ui", "lint-shell"} {
-			l.ck(!strings.Contains(ps, dup), "build.ps1: 不再内联 "+dup+" 步骤")
-		}
-		l.ck(!nodeToolRE.MatchString(ps), "build.ps1: 不再需要 node/python")
-	}
-
 	// The `bash -n` syntax check on cmd/* moved into the Go pipeline with
 	// everything else; assert it is still wired there, because losing it is
 	// invisible until the package fails to install.

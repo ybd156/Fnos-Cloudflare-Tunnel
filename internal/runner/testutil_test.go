@@ -90,7 +90,7 @@ func newHarness(t *testing.T, tunnels ...config.Tunnel) *harness {
 	m.pendingWait = 300 * time.Millisecond
 
 	// Leave no goroutine, timer or open log file behind: an open server.log
-	// would make TempDir cleanup fail on Windows.
+	// keeps the directory busy and makes TempDir cleanup fail.
 	t.Cleanup(func() {
 		for i := 0; i < 3; i++ {
 			m.StopAll()

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -12,13 +11,9 @@ import (
 )
 
 // assertPrivateMode checks that a file holding secrets is not group/world
-// readable. Windows only models the read-only bit through chmod, so the POSIX
-// assertion applies on the platform the package actually ships to.
+// readable.
 func assertPrivateMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		return
-	}
 	st, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("文件不存在: %v", err)

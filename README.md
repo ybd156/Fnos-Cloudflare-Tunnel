@@ -74,7 +74,6 @@ fnos-cloudflared/
 │   ├── ARCHITECTURE.md       # 包边界、导出接口契约、工程规则
 │   └── DESIGN.md             # 运行形态、关键不变量、历代缺陷记录
 ├── build.sh                  # 薄封装：定位 go 后转调 tools/build
-├── build.ps1                 # 同上（Windows）
 └── dist/cloudflared.fpk      # 构建产物（本地产物，不随仓库分发）
 ```
 
@@ -151,28 +150,12 @@ md5 会写进 manifest，而 tar 时间戳每次都变），手工上传会让�
 ./build.sh --no-pack    # 只跑全部校验，不打 .fpk（没有 fnpack 的机器用这个）
 ```
 
-Windows 上用等价封装：
+构建宿主**只支持 Linux**（GitHub Actions 的 ubuntu runner，或任意 Linux/WSL 环境）：
+流水线需要真实的执行位、`bash -n` 与官方 Linux 版 fnpack。官方 fnpack：
+`https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64`。
 
-```powershell
-pwsh -File build.ps1
-pwsh -File build.ps1 -NoIcons -Fnpack C:\tools\fnpack.exe
-```
-
-> **在 Windows 上建议改用 WSL 构建。** 目标平台是 Linux，在 WSL 里构建能省掉
-> 整类 Windows 特有的麻烦：`chmod` 有真实的权限位（归档不需要再归一化，实测
-> Linux 上修正 0 个、Windows 上要修正 23+23 个）、`bash -n` 能真跑、`fnpack`
-> 用官方 Linux 版、也不受 `%TEMP%` 不可写的影响。
->
-> ```bash
-> wsl -e bash -lc 'cd ~/fncfd-build && ./build.sh'
-> ```
->
-> 官方 Linux 版 fnpack：`https://static2.fnnas.com/fnpack/fnpack-1.2.3-linux-amd64`。
-> Windows 路径仍然受支持（`build.ps1` 会自动把临时目录指到 `work/tmp`），只是
-> 多一道权限位修正。
-
-两个脚本都只是**薄封装**：解析自己的参数、定位 `go` 与 `fnpack`，然后转调
-`go run ./tools/build`。流水线只存在一份，不会像 1.4.1 那样两份脚本各自漂移。
+`build.sh` 只是**薄封装**：解析自己的参数、定位 `go` 与 `fnpack`，然后转调
+`go run ./tools/build`。流水线只存在一份。
 
 流水线依次完成：
 
@@ -197,8 +180,8 @@ pwsh -File build.ps1 -NoIcons -Fnpack C:\tools\fnpack.exe
 > 打包好的 `.fpk`（其中当然包含这两个二进制）作为 GitHub Release 附件发布。
 
 > **为什么需要归档权限归一化。** `fnpack` 的权限位取自宿主文件系统的 `stat()`。Linux 上
-> 第 4 步的 `chmod` 已经生效；但 Windows 没有可执行位，于是每个文件都变成 `0666`、
-> 目录变成 `0777` —— `cmd/main` 和两个二进制到了 NAS 上是**不可执行**的，应用根本起不来。
+> `fnpack` 直接取宿主 `stat()` 的模式，且**不校验**它：模式错了，`cmd/main` 和两个二进制
+> 到了 NAS 上就是**不可执行**的，应用根本起不来，而打包过程仍然打印成功。
 > `tools/fpk` 把两层 tar 的权限位改写回 Linux 的正确值，并同步修正 manifest 里的
 > `checksum`（它是新 `app.tgz` 的 MD5）。
 
@@ -220,15 +203,15 @@ go run ./tools/lintui   # 前端选择器契约
 go run ./tools/lintshell# 生命周期脚本静态契约
 ```
 
-竞态检测需要 cgo（Windows 上没有 gcc），生命周期套件需要 Linux 语义
-（`/proc`、`ps`、`curl`、unix socket）。在 Windows 上开发时用 WSL 跑这两项：
+竞态检测需要 cgo，生命周期套件需要 Linux 语义（`/proc`、`ps`、`curl`、unix socket）。
+这两项都在 CI 上跑；本地需要时用任意 Linux 环境：
 
 ```bash
 # 竞态检测
 wsl -e bash -lc 'cd /mnt/d/.../fnos-cloudflared && \
   PATH=$HOME/go-toolchain/go/bin:$PATH CGO_ENABLED=1 go test -race ./...'
 
-# 模拟安装（先复制到 WSL 原生盘：/mnt/d 是 drvfs，chmod 语义不完整）
+# 模拟安装（用原生 Linux 文件系统：drvfs/网络盘上的 chmod 语义不完整）
 wsl -e bash -lc 'mkdir -p ~/fncfd-test && cd ~/fncfd-test && \
   cp -a /mnt/d/.../fnos-cloudflared/{go.mod,cmd,internal,cloudflared,tools} . && \
   setsid bash tools/test-lifecycle.sh'
@@ -432,7 +415,7 @@ A：`cmd/main status` 返回 `0` = 运行中，`3` = 未运行，`1` = 失败。
   因此同一套代码在「网关访问」与「本地直连」两种入口下都能正确解析资源路径
 - 生命周期脚本参考 `fn-deepseek-harness` 的健壮性写法：用 `/proc/<pid>/stat`
   识别僵尸进程、用 `/proc/<pid>/cmdline` 校验进程身份以避免误杀 PID 复用进程
-- 构建工具同样是 Go，`build.sh` 与 `build.ps1` 只做薄封装
+- 构建工具同样是 Go，`build.sh` 只做薄封装；构建宿主是 Linux（CI 用 ubuntu runner）
 
 更细的设计与缺陷史见 [`docs/DESIGN.md`](docs/DESIGN.md)，
 包边界与接口契约见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。

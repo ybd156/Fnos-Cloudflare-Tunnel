@@ -5,11 +5,14 @@
 //	go run ./tools/build --no-icons   skip icon regeneration
 //	go run ./tools/build --no-pack    run every check, stop before fnpack
 //
-// build.sh and build.ps1 are thin wrappers around this command. They used to
-// each implement the same twelve steps, and they drifted: build.sh ran a
-// JavaScript syntax check that build.ps1 never had, so a Windows build could
-// ship a frontend that did not parse. Keeping the steps here means there is one
-// definition of "the pipeline" regardless of the host.
+// build.sh is a thin wrapper around this command. It used to implement the same
+// twelve steps itself, and drifted from the pipeline: it ran a JavaScript syntax
+// check that the pipeline never had, so a build could ship a frontend that did
+// not parse. Keeping the steps here means there is exactly one definition of
+// "the pipeline".
+//
+// The build host is Linux (GitHub Actions ubuntu runner, or WSL): the pipeline
+// needs a real executable bit, bash -n, and the official Linux fnpack.
 //
 // Requires Go (>= 1.22) and, for the packing step, the official `fnpack`
 // utility (https://developer.fnnas.com/docs/cli/fnpack).
@@ -41,9 +44,8 @@ import (
 
 const usage = `Build the Cloudflare Tunnel .fpk package for fnOS.
 
-  ./build.sh                 bash host   (icons, validate, pack)
-  pwsh -File build.ps1       Windows     (same pipeline)
-  go run ./tools/build       any host    (the pipeline itself)
+  ./build.sh                 Linux host  (icons, validate, pack)
+  go run ./tools/build       the pipeline itself
 
   --no-icons        skip icon regeneration
   --no-pack         stop after validation (hosts without fnpack)
@@ -77,21 +79,6 @@ type pipeline struct {
 	fnpack    string
 	skipIcons bool
 	skipPack  bool
-}
-
-// scratchDir returns a writable directory for tools that unpack into $TMPDIR.
-//
-// The host temp directory is not always usable (a locked-down Windows profile
-// denies it outright, and fnpack then fails with a bare "Access is denied").
-// Keeping the scratch area inside the checkout makes the build independent of
-// the host's TMP configuration.
-func (p *pipeline) scratchDir() (string, error) {
-	dir := filepath.Join(p.root, "work", "tmp")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	// A stale tree from an interrupted build would otherwise be reused.
-	return dir, nil
 }
 
 func main() {
@@ -243,13 +230,6 @@ func (p *pipeline) run(fnpackFlag string) error {
 	cmd.Dir = p.dist // fnpack writes <appname>.fpk into the working directory
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	// fnpack unpacks into $TMPDIR. When that location is not writable it fails
-	// with a bare "Access is denied" that says nothing about the cause, so give
-	// it a scratch directory inside the checkout instead of inheriting whatever
-	// the host points at.
-	if tmp, tmpErr := p.scratchDir(); tmpErr == nil {
-		cmd.Env = envWith(os.Environ(), "TMPDIR="+tmp, "TMP="+tmp, "TEMP="+tmp)
-	}
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("fnpack build failed: %w", err)
 	}
@@ -257,21 +237,19 @@ func (p *pipeline) run(fnpackFlag string) error {
 		return fmt.Errorf("expected %s was not produced", fpkPath)
 	}
 
-	// fnpack takes archive modes from the host filesystem's stat(). On Linux the
-	// chmod above has already applied them, but on Windows there is no
-	// executable bit at all: every file lands as 0666 and every directory as
-	// 0777, so cmd/main and app/bin/cloudflared reach the NAS non-executable and
-	// the app cannot start. Rewrite the modes in both tar layers; this also
-	// repairs the manifest checksum, which records the MD5 of the rewritten
-	// app.tgz.
+	// fnpack takes archive modes from the host filesystem's stat() and never
+	// checks them, so a wrong mode ships silently: cmd/main and
+	// app/bin/cloudflared arrive on the NAS non-executable and the app cannot
+	// start. Rewrite the modes in both tar layers to what the payload needs;
+	// this also repairs the manifest checksum, which records the MD5 of the
+	// rewritten app.tgz.
 	step("Normalising archive permissions")
 	if _, err := fpk.Normalize(fpkPath, os.Stdout); err != nil {
 		return fmt.Errorf("archive permission normalisation failed: %w", err)
 	}
 
-	// fnpack writes the archive with whatever umask the volume reports, and this
-	// filesystem presents new files as mode 0000, which would leave the artefact
-	// unreadable. Make sure the result can actually be copied out.
+	// fnpack writes the archive with whatever umask the host reports; make sure
+	// the result can actually be copied out.
 	_ = os.Chmod(p.dist, 0o755)
 	_ = os.Chmod(fpkPath, 0o644)
 
@@ -420,9 +398,6 @@ func pickBash() (string, string) {
 // may be unusable.
 func bashCandidates() []string {
 	names := []string{"bash"}
-	if runtime.GOOS == "windows" {
-		names = []string{"bash.exe", "bash"}
-	}
 	var out []string
 	seen := make(map[string]bool)
 	add := func(path string) {

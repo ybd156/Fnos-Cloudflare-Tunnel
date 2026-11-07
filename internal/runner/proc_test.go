@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -123,9 +122,8 @@ func TestStopEndsARealChild(t *testing.T) {
 		t.Fatalf("error = %q, want empty after a clean stop", errMsg)
 	}
 	// A process ended by a signal has no exit code, which is why the previous
-	// implementation reported null. Windows has no SIGTERM, so the fallback
-	// there terminates the process with a status instead.
-	if runtime.GOOS != "windows" && code != nil {
+	// implementation reported null.
+	if code != nil {
 		t.Fatalf("lastExitCode = %d, want null for a signalled process", *code)
 	}
 }

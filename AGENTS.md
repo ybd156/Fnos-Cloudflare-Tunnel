@@ -55,7 +55,7 @@
 # 测试
 go vet ./...
 go test ./...
-go test -race ./...                     # 需要 cgo；Windows 上跑不了
+go test -race ./...                     # 需要 cgo（CI 上有；本地要 Linux 环境）
 setsid bash tools/test-lifecycle.sh     # 需要 Linux；模拟安装→启动→API→设置→卸载
 
 # 单项工具
@@ -67,7 +67,7 @@ go run ./tools/fetchcf -latest          # 把 pin 跟到上游最新版（下载
 go run ./tools/fpk verify dist/cloudflared.fpk   # 产物逐字节复核
 ```
 
-Windows 上用 `pwsh -File build.ps1`；**更推荐 WSL**（`chmod`/`bash -n`/`fnpack` 都是 Linux 语义）。
+**构建宿主只支持 Linux**（CI 的 ubuntu runner，或任意 Linux/WSL）：`chmod`、`bash -n`、`fnpack` 都是 Linux 语义。
 
 ---
 
@@ -77,10 +77,10 @@ Windows 上用 `pwsh -File build.ps1`；**更推荐 WSL**（`chmod`/`bash -n`/`f
 2. **`cloudflared/manifest` 的 `version` 必须等于 git tag**（`v1.4.10` ↔ `version = 1.4.10`）。
    CI 会断言，不一致直接红。
 3. **服务二进制必须 `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`**，否则装到 NAS 上跑不起来。
-4. **归档权限位必须归一化。** `fnpack` 从宿主 `stat()` 取模式；Windows 上全是 `0666/0777`，
-   `cmd/main` 与两个二进制到了 NAS 不可执行。`tools/fpk normalize` 负责改写，别绕过。
-5. **脚本必须 `100755`。** Windows 检出会把执行位丢掉（git 里记成 `100644`），
-   Linux 上 `./build.sh` 就是 `Permission denied`（exit 126）。改完跑
+4. **归档权限位必须归一化。** `fnpack` 从宿主 `stat()` 取模式且不校验；模式错了，
+   `cmd/main` 与两个二进制到了 NAS 不可执行，而打包仍打印成功。`tools/fpk normalize` 负责改写，别绕过。
+5. **脚本必须 `100755`。** 在会丢执行位的环境（Windows 检出、某些挂载）里 git 会把它记成
+   `100644`，Linux 上 `./build.sh` 就是 `Permission denied`（exit 126）。改完跑
    `git update-index --chmod=+x <file>` 确认。
 6. **AF_UNIX 路径 ≤ 108 字节。** 服务在载荷目录里绑 `app.sock`；CI 的
    `/home/runner/work/<repo>/<repo>/` 会让路径超限、bind 失败、后面所有 API 断言变成空响应。

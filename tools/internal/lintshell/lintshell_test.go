@@ -75,10 +75,6 @@ GO_BIN="$(command -v go)"
 exec "${GO_BIN}" run ./tools/build "$@"
 `
 
-const goodBuildPs1 = `$GoExe = Get-Command go
-& $GoExe @('run', './tools/build')
-`
-
 const goodPipeline = `package main
 // bash -n over every lifecycle script
 var args = []string{"-n"}
@@ -104,7 +100,6 @@ func goodTree() map[string]string {
 		"cloudflared/cmd/upgrade_init":       "#!/bin/bash\nset -u\nexit 0\n",
 		"cloudflared/cmd/upgrade_callback":   "#!/bin/bash\nset -u\nexit 0\n",
 		"build.sh":                           goodBuildSh,
-		"build.ps1":                          goodBuildPs1,
 		"tools/test-lifecycle.sh":            goodLifecycle,
 		"tools/build/main.go":                goodPipeline,
 	}
@@ -218,19 +213,6 @@ func TestFatBuildShFails(t *testing.T) {
 		t.Fatalf("a build.sh that implements the steps itself was accepted\n%s", out)
 	}
 	if !strings.Contains(out, "转调 tools/build") {
-		t.Fatalf("unexpected output:\n%s", out)
-	}
-}
-
-func TestFatBuildPs1Fails(t *testing.T) {
-	tree := goodTree()
-	tree["build.ps1"] = "& $Py (Join-Path $Root 'tools\\normalize-fpk.py') $fpk\n"
-	root := fixture(t, tree)
-	out, err := runLint(t, root)
-	if err == nil {
-		t.Fatalf("a build.ps1 that inlines a pipeline step was accepted\n%s", out)
-	}
-	if !strings.Contains(out, "normalize-fpk") {
 		t.Fatalf("unexpected output:\n%s", out)
 	}
 }
