@@ -1,6 +1,6 @@
 # Cloudflare Tunnel for fnOS（飞牛 OS）
 
-[![build](https://github.com/ybd156/fnos-cloudflared/actions/workflows/build.yml/badge.svg)](https://github.com/ybd156/fnos-cloudflared/actions/workflows/build.yml)
+[![build](https://github.com/ybd156/Fnos-Cloudflare-Tunnel/actions/workflows/build.yml/badge.svg)](https://github.com/ybd156/Fnos-Cloudflare-Tunnel/actions/workflows/build.yml)
 
 把 Cloudflare Tunnel（内网穿透）带到飞牛 OS 的应用。内置官方 `cloudflared`
 客户端，可在**不开放任何路由器端口**的前提下，把 NAS 上的服务安全发布到公网，
@@ -275,7 +275,7 @@ JS 引擎的 Go 测试里无法执行浏览器代码，因此该套件**没有�
 
 应用需要 root 权限安装，请在**飞牛 OS 的「应用中心」中手动安装**：
 
-1. 从本仓库的 [Releases](https://github.com/ybd156/fnos-cloudflared/releases)
+1. 从本仓库的 [Releases](https://github.com/ybd156/Fnos-Cloudflare-Tunnel/releases)
    下载最新版 `cloudflared-<版本>.fpk`（`dist/` 只是本地构建目录，不在仓库中）
 2. 打开「应用中心」→ 右上角「手动安装」→ 选择该 `.fpk`
 3. 安装向导中确认是否「服务启动时自动运行已启用的隧道」
