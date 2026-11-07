@@ -164,14 +164,31 @@ func writePIDFile(path string) error {
 // to config.json and exits. cmd/config_callback calls this instead of running an
 // inline script.
 func runConfigSet(p paths.Paths) {
-	if err := p.EnsureDirs(); err != nil {
-		fmt.Fprintf(os.Stderr, "无法创建数据目录 %s: %v\n", p.PkgVar, err)
+	if err := configSet(p, os.Getenv); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
-	if err := config.ApplyWizardSettings(p.ConfigFile, os.Getenv); err != nil {
-		fmt.Fprintf(os.Stderr, "写入配置文件 %s 失败: %v\n", p.ConfigFile, err)
-		os.Exit(1)
+}
+
+// configSet is the body of the config-set subcommand, split out of main so a
+// test can exercise it without spawning a child process.
+//
+// It creates only the directory that holds config.json. EnsureDirs()
+// deliberately reports the first failure among several unrelated directories
+// (tmp, logs, credentials) so that one unusable path cannot take the others
+// down with it; calling it here and treating its error as fatal meant an
+// unwritable tmp directory made the App Center settings page fail to save
+// anything at all -- the wizard reported an error while config.json stayed
+// untouched, so the user's change silently disappeared.
+func configSet(p paths.Paths, getenv func(string) string) error {
+	dir := filepath.Dir(p.ConfigFile)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("无法创建数据目录 %s: %w", dir, err)
 	}
+	if err := config.ApplyWizardSettings(p.ConfigFile, getenv); err != nil {
+		return fmt.Errorf("写入配置文件 %s 失败: %w", p.ConfigFile, err)
+	}
+	return nil
 }
 
 // appVersion reports the version recorded in the package manifest.
