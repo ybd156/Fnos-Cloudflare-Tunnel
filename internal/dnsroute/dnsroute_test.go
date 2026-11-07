@@ -413,6 +413,12 @@ func TestLookupCNAME(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	res.dohEndpoint = srv.URL
+	// LookupCNAME falls back to the system resolver when DoH fails (1.4.4), so
+	// this assertion only reaches the DoH error path when the fallback fails too.
+	// Stubbing it keeps the test hermetic: the real resolver on some hosts
+	// answers (or hijacks) example.com, which made this assertion pass or fail
+	// depending on whose machine ran it.
+	res.systemLookup = func(string) (string, error) { return "", errors.New("no such host") }
 	if _, err := res.LookupCNAME("nas.example.com"); err == nil ||
 		err.Error() != "DNS 查询失败 (HTTP 502)" {
 		t.Fatalf("HTTP failure error = %v", err)
@@ -421,6 +427,10 @@ func TestLookupCNAME(t *testing.T) {
 
 func TestLookupCNAMEBadJSON(t *testing.T) {
 	res, _ := newTestResolver(t)
+	// Same reason as TestLookupCNAME: the 1.4.4 system-resolver fallback must
+	// fail here, otherwise the undecodable DoH body is masked by a resolver
+	// answer and this test depends on the host's DNS.
+	res.systemLookup = func(string) (string, error) { return "", errors.New("no such host") }
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "not json")
 	}))
