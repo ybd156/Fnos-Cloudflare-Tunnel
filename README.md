@@ -98,6 +98,27 @@ fnos-cloudflared/
 流水线不依赖仓库里存二进制：cloudflared 由 `tools/fetchcf` 按 `tools/internal/cfpin`
 固定的版本与 SHA-256 拉取，`fnpack` 按固定 URL + SHA-256 取（都在 workflow 顶部的 `env` 里）。
 
+### cloudflared 版本跟进
+
+包里的 cloudflared **不会停在某个固定版本**：
+
+- 打包前跑一次 `go run ./tools/fetchcf -latest`：向 GitHub 问最新 release，下载
+  `cloudflared-linux-amd64`，校验是 Linux ELF 并算出 SHA-256，**先把新版本与新哈希
+  写进 `tools/internal/cfpin/cfpin.go`，再落盘**。后面的 `build.sh` 与 `tools/fpk
+  verify` 都按新 pin 校验，所以「跟进」不会绕过校验。
+- [`.github/workflows/pin.yml`](.github/workflows/pin.yml) 每周一自动跑同一条命令，
+  有变化就把 `cfpin.go` 提交回 `main`，让仓库里的 pin 与最近一次发版保持一致。
+  也可以手动 dispatch。
+- 想立刻跟进、或本地构建前对齐：
+
+```bash
+go run ./tools/fetchcf -latest   # 改 pin + 下载并校验二进制
+go run ./tools/fetchcf -check    # 只校验本地副本与 pin 是否一致
+```
+
+pin 是构建期校验的锚点：手动改版本号而不改哈希（或换了同版本的另一份构建）会让
+`tools/fpk verify` 直接失败，而不是把不一致的二进制打进包里。
+
 发一个版本：
 
 ```bash

@@ -44,9 +44,9 @@ func (p Pin) URL() string {
 // version bumped without re-deriving the hash (or a swapped same-version
 // rebuild) fails the build.
 var Pinned = Pin{
-	Version: "2026.9.3",
+	Version: "2026.10.7",
 	Asset:   "cloudflared-linux-amd64",
-	SHA256:  "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2",
+	SHA256:  "1f99fb518b83dec2ba8d870a7cc991d82a77e6196295a3d2754ba17ab9f91872",
 }
 
 // Dest is where the binary must live for fnpack to pick it up.

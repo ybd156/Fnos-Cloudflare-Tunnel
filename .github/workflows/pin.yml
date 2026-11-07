@@ -1,0 +1,48 @@
+name: pin-cloudflared
+
+# 每周把 tools/internal/cfpin 的 pin 跟到 upstream 最新版，并直接提交到 main。
+#
+# 为什么单独一个 workflow：发布流程本来就会在打包前跟进最新版，但那只在发版
+# 时发生。仓库里的 pin 若长期落后，本地构建、`go test` 和 fpk 复核用的都是旧
+# 版本，跟实际发出去的包对不上。这一条让「仓库里的 pin」保持在最近一周内。
+#
+# 只提交 cfpin.go：40MB 的二进制在 .gitignore 里，不进球。
+
+on:
+  schedule:
+    - cron: '0 3 * * 1' # 每周一 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pin:
+    name: 跟进最新 cloudflared
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: false
+
+      - name: 解析并下载最新版
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run ./tools/fetchcf -latest
+
+      - name: 有变化就提交
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- tools/internal/cfpin/cfpin.go; then
+            echo "已是最新，无需提交"
+            exit 0
+          fi
+          version="$(sed -n 's/^\tVersion: "\(.*\)",/\1/p' tools/internal/cfpin/cfpin.go)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tools/internal/cfpin/cfpin.go
+          git commit -m "chore: pin cloudflared ${version}"
+          git push

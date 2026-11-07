@@ -73,6 +73,14 @@ jobs:
           sudo install -m 0755 /tmp/fnpack /usr/local/bin/fnpack
           command -v fnpack
 
+      # 每次构建都跟进 upstream 最新版：这一步会改写 tools/internal/cfpin 里的
+      # pin（版本 + SHA-256）并下载对应二进制，后面的 build.sh 与产物复核都按
+      # 新 pin 校验。仓库里提交的 pin 只是「上次跟进的结果」，不是上限。
+      - name: 跟进 cloudflared 最新版
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go run ./tools/fetchcf -latest
+
       # build.sh 是一条完整流水线：拉取并校验 cloudflared → 生成图标 →
       # 交叉编译 fncfd → 归一化权限 → 各 lint → fnpack → 逐字节复核产物。
       # 任何一步失败都会让这一步红，不会产出「看起来成功」的包。
